@@ -76,10 +76,10 @@ export default function HomePage() {
             
             {/* 主导航菜单 - 隐藏在移动端 */}
             <nav className="hidden md:flex items-center space-x-6">
-              <a href="#" className="text-gray-600 hover:text-blue-600 transition-colors">
+              <a href="planning" className="text-gray-600 hover:text-blue-600 transition-colors">
                 智能规划
               </a>
-              <a href="#" className="text-gray-600 hover:text-blue-600 transition-colors">
+              <a href="chat" className="text-gray-600 hover:text-blue-600 transition-colors">
                 AI问答
               </a>
               <a href="#" className="text-gray-600 hover:text-blue-600 transition-colors">
