@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>上海旅游AI助手</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .chat-container {
+            width: 90%;
+            max-width: 800px;
+            height: 80vh;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(45deg, #ff6b6b, #feca57);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 1.8em;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 0.9em;
+        }
+
+        .status-bar {
+            background: #f8f9fa;
+            padding: 10px 20px;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85em;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #28a745;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.offline {
+            background: #dc3545;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            font-size: 0.95em;
+            line-height: 1.4;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+
+        .message.bot {
+            background: #f1f3f4;
+            color: #333;
+            align-self: flex-start;
+            border: 1px solid #e8eaed;
+        }
+
+        .message.error {
+            background: #fee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+
+        .message.loading {
+            background: #fff3e0;
+            color: #f57c00;
+            border: 1px solid #ffcc02;
+            position: relative;
+        }
+
+        .message.loading::after {
+            content: '';
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f57c00;
+            border-top: 2px solid transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .input-area {
+            background: white;
+            padding: 20px;
+            border-top: 1px solid #e9ecef;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e9ecef;
+            border-radius: 25px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s ease;
+        }
+
+        .chat-input:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .send-btn {
+            width: 48px;
+            height: 48px;
+            border: none;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.3s ease;
+        }
+
+        .send-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .send-btn:disabled {
+            background: #adb5bd;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .quick-questions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .quick-btn {
+            padding: 6px 12px;
+            background: white;
+            border: 1px solid #667eea;
+            color: #667eea;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 0.8em;
+            transition: all 0.3s ease;
+        }
+
+        .quick-btn:hover {
+            background: #667eea;
+            color: white;
+            transform: translateY(-1px);
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .chat-container {
+                width: 95%;
+                height: 90vh;
+                border-radius: 15px;
+            }
+            
+            .header h1 {
+                font-size: 1.5em;
+            }
+            
+            .message {
+                max-width: 90%;
+                font-size: 0.9em;
+            }
+            
+            .quick-questions {
+                justify-content: center;
+            }
+        }
+
+        /* 滚动条美化 */
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 3px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="header">
+            <h1>🏮 上海旅游AI助手</h1>
+            <p>基于MCP+RAG架构的智能旅游咨询服务</p>
+        </div>
+
+        <div class="status-bar">
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">连接中...</span>
+            </div>
+            <div id="systemInfo">AI助手 v1.0</div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <!-- 消息将在这里显示 -->
+        </div>
+
+        <div class="input-area">
+            <input 
+                type="text" 
+                id="chatInput" 
+                class="chat-input" 
+                placeholder="请输入您的旅游问题..."
+                maxlength="500"
+                autocomplete="off"
+            >
+            <button id="sendBtn" class="send-btn" title="发送消息">
+                ➤
+            </button>
+        </div>
+
+        <div class="quick-questions">
+            <button class="quick-btn" onclick="quickAsk('外滩现在天气怎么样？')">外滩天气</button>
+            <button class="quick-btn" onclick="quickAsk('东方明珠的详细介绍')">东方明珠</button>
+            <button class="quick-btn" onclick="quickAsk('上海博物馆开放时间')">博物馆</button>
+            <button class="quick-btn" onclick="quickAsk('帮我规划上海一日游')">一日游</button>
+            <button class="quick-btn" onclick="quickAsk('上海有什么特色美食？')">特色美食</button>
+        </div>
+    </div>
+
+    <script>
+        class ShanghaiTourismChat {
+            constructor() {
+                this.apiBase = 'http://localhost:5000/api';
+                this.userId = 'user_' + Date.now();
+                this.conversationId = null;
+                this.isLoading = false;
+                
+                this.initElements();
+                this.bindEvents();
+                this.checkAPIStatus();
+                this.showWelcomeMessage();
+            }
+
+            initElements() {
+                this.chatMessages = document.getElementById('chatMessages');
+                this.chatInput = document.getElementById('chatInput');
+                this.sendBtn = document.getElementById('sendBtn');
+                this.statusDot = document.getElementById('statusDot');
+                this.statusText = document.getElementById('statusText');
+                this.systemInfo = document.getElementById('systemInfo');
+            }
+
+            bindEvents() {
+                this.sendBtn.addEventListener('click', () => this.sendMessage());
+                this.chatInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && !this.isLoading) {
+                        this.sendMessage();
+                    }
+                });
+                
+                // 自动调整输入框高度
+                this.chatInput.addEventListener('input', (e) => {
+                    e.target.style.height = 'auto';
+                    e.target.style.height = Math.min(e.target.scrollHeight, 100) + 'px';
+                });
+            }
+
+            async checkAPIStatus() {
+                try {
+                    const response = await fetch(this.apiBase.replace('/api', '') + '/');
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.updateStatus(true, 'API服务正常');
+                        this.systemInfo.textContent = `${data.data?.service || '上海旅游AI助手'} v${data.data?.version || '1.0'}`;
+                    } else {
+                        throw new Error('API响应异常');
+                    }
+                } catch (error) {
+                    console.error('API状态检查失败:', error);
+                    this.updateStatus(false, 'API服务离线');
+                    this.addMessage('bot', '😅 无法连接到AI服务，请确保API服务器正在运行：\n\n```bash\npython api_server.py\n```', 'error');
+                }
+            }
+
+            updateStatus(online, message) {
+                this.statusDot.className = `status-dot ${online ? '' : 'offline'}`;
+                this.statusText.textContent = message;
+            }
+
+            showWelcomeMessage() {
+                const welcomeText = `🏮 欢迎使用上海旅游AI助手！
+
+我可以帮您：
+• 🌤️ 查询实时天气和景点状况  
+• 🏛️ 获取景点详细信息和攻略
+• 🗺️ 规划个性化旅游路线
+• 💡 提供实用的旅行建议
+
+请随时向我提问！`;
+
+                this.addMessage('bot', welcomeText);
+            }
+
+            async sendMessage() {
+                const message = this.chatInput.value.trim();
+                if (!message || this.isLoading) return;
+
+                // 添加用户消息
+                this.addMessage('user', message);
+                this.chatInput.value = '';
+                this.chatInput.style.height = 'auto';
+                this.setLoading(true);
+
+                try {
+                    const response = await this.callAPI('/chat', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            message: message,
+                            user_id: this.userId,
+                            conversation_id: this.conversationId
+                        })
+                    });
+
+                    if (response.success) {
+                        this.conversationId = response.data.conversation_id;
+                        this.addMessage('bot', response.data.response);
+                        
+                        // 更新系统信息
+                        const responseTime = response.data.response_time;
+                        if (responseTime) {
+                            this.systemInfo.textContent = `响应时间: ${responseTime}s | ${response.data.mode || '标准'}模式`;
+                        }
+                    } else {
+                        throw new Error(response.message || '请求失败');
+                    }
+                } catch (error) {
+                    console.error('发送消息失败:', error);
+                    let errorMsg = '😅 抱歉，服务暂时不可用。';
+                    
+                    if (error.message.includes('fetch')) {
+                        errorMsg += '\n\n💡 请确保API服务器正在运行：\n```bash\npython api_server.py\n```';
+                    }
+                    
+                    this.addMessage('bot', errorMsg, 'error');
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            async callAPI(endpoint, options = {}) {
+                const url = this.apiBase + endpoint;
+                const response = await fetch(url, {
+                    ...options,
+                    headers: {
+                        'Accept': 'application/json',
+                        ...options.headers
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                return await response.json();
+            }
+
+            addMessage(sender, content, type = '') {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${sender} ${type}`;
+
+                // 格式化消息内容
+                const formattedContent = this.formatMessage(content);
+                messageDiv.innerHTML = formattedContent;
+
+                this.chatMessages.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+
+            formatMessage(content) {
+                // 处理换行
+                content = content.replace(/\n/g, '<br>');
+                
+                // 处理代码块
+                content = content.replace(/```(\w+)?\n?([\s\S]*?)```/g, 
+                    '<div style="background: #f4f4f4; padding: 8px; border-radius: 4px; margin: 8px 0; font-family: monospace; font-size: 0.9em; border-left: 3px solid #667eea;">$2</div>');
+                
+                // 处理粗体
+                content = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                
+                // 处理表情符号
+                content = content.replace(/(🏮|🌤️|👥|🚇|💡|🎯|⏰|⏱️|🌍|💧|🌬️|🏛️|🗺️|📍|😅|💬)/g, 
+                    '<span style="font-size: 1.1em;">$1</span>');
+                
+                // 处理列表项
+                content = content.replace(/^• (.+)$/gm, '<div style="margin: 4px 0;">• $1</div>');
+                
+                return content;
+            }
+
+            setLoading(loading) {
+                this.isLoading = loading;
+                this.sendBtn.disabled = loading;
+                this.sendBtn.innerHTML = loading ? '⏳' : '➤';
+
+                if (loading) {
+                    this.addMessage('bot', '正在思考中...', 'loading');
+                } else {
+                    // 移除加载消息
+                    const loadingMessages = this.chatMessages.querySelectorAll('.loading');
+                    loadingMessages.forEach(msg => msg.remove());
+                }
+            }
+
+            scrollToBottom() {
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            }
+        }
+
+        // 快速提问函数
+        function quickAsk(question) {
+            const chatInput = document.getElementById('chatInput');
+            chatInput.value = question;
+            chatInput.focus();
+            
+            // 自动发送
+            if (window.chatApp && !window.chatApp.isLoading) {
+                window.chatApp.sendMessage();
+            }
+        }
+
+        // 初始化应用
+        document.addEventListener('DOMContentLoaded', () => {
+            window.chatApp = new ShanghaiTourismChat();
+        });
+
+        // 错误处理
+        window.addEventListener('error', (e) => {
+            console.error('页面错误:', e.error);
+        });
+
+        // 页面可见性检测（自动重连）
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && window.chatApp) {
+                setTimeout(() => {
+                    window.chatApp.checkAPIStatus();
+                }, 1000);
+            }
+        });
+    </script>
+</body>
+</html>
