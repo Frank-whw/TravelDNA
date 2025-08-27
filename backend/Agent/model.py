@@ -7,6 +7,7 @@ import json
 import time
 from mcp_services import MCPServiceManager, WeatherMCPService, CrowdMCPService, TrafficMCPService
 from mcp_rag_integration import EnhancedTourismAssistant, MCPRAGIntegrator
+from traffic_service import TrafficService, get_attraction_traffic, analyze_route_traffic, format_traffic_for_agent
 
 load_dotenv()
 
@@ -40,6 +41,9 @@ class TourismAssistant:
             # 初始化传统MCP服务管理器
             self.mcp_manager = MCPServiceManager()
             self.enhanced_assistant = None
+        
+        # 初始化交通服务
+        self.traffic_service = TrafficService()
         
         # 上海旅游知识库
         self.shanghai_knowledge = {
@@ -231,7 +235,7 @@ class TourismAssistant:
         
         return any(keyword in query for keyword in mcp_keywords)
 
-    def _create_enhanced_prompt(self, query, knowledge_context="", mcp_results=None):
+    def _create_enhanced_prompt(self, query, knowledge_context="", mcp_results=None, traffic_info=None):
         """创建增强的提示词，整合所有信息源"""
         
         current_time = datetime.now().strftime('%Y年%m月%d日 %H:%M')
@@ -248,16 +252,76 @@ class TourismAssistant:
             "请基于以下信息回答用户问题，确保信息准确、实用、友好："
         ]
         
-        # 添加实时MCP服务数据
-        if mcp_results:
-            prompt_parts.append("\n🔴 实时数据（优先参考）：")
-            for service_type, data in mcp_results.items():
-                if service_type == 'weather' and data:
-                    prompt_parts.append(f"天气：{data.get('location')}地区{data.get('temperature')}°C，{data.get('condition')}，湿度{data.get('humidity')}%")
-                elif service_type == 'crowd' and data:
-                    prompt_parts.append(f"人流：{data.get('location')}地区拥挤程度{data.get('level_description')}({data.get('crowd_level')}%)，等待{data.get('wait_time')}分钟")
-                elif service_type == 'traffic' and data:
-                    prompt_parts.append(f"交通：{data.get('location')}地区路况{data.get('congestion_level')}，建议{data.get('recommendations')}")
+        # 添加实时数据（天气、人流、交通）
+        if mcp_results or traffic_info:
+            prompt_parts.append("\n🔴 实时数据（优先参考并融入攻略建议）：")
+            
+            # 处理天气数据
+            if 'weather' in mcp_results and mcp_results['weather']:
+                weather = mcp_results['weather']
+                weather_info = []
+                if weather.get('district'):
+                    weather_info.append(f"地点：{weather.get('district')}")
+                weather_info.append(f"温度：{weather.get('temperature', '未知')}")
+                weather_info.append(f"天气：{weather.get('weather', '未知')}")
+                weather_info.append(f"湿度：{weather.get('humidity', '未知')}")
+                weather_info.append(f"风力：{weather.get('wind', '未知')}")
+                if weather.get('recommendation'):
+                    weather_info.append(f"建议：{weather.get('recommendation')}")
+                if weather.get('report_time'):
+                    weather_info.append(f"数据时间：{weather.get('report_time')}")
+                prompt_parts.append(f"☀️ 天气状况：{' | '.join(weather_info)}")
+            
+            # 处理人流数据
+            if 'crowd' in mcp_results and mcp_results['crowd']:
+                crowd = mcp_results['crowd']
+                crowd_info = []
+                crowd_info.append(f"人流状况：{crowd.get('crowd_level', '未知')}")
+                crowd_info.append(f"等待时间：{crowd.get('wait_time', '未知')}")
+                if crowd.get('best_visit_time'):
+                    crowd_info.append(f"最佳时间：{crowd.get('best_visit_time')}")
+                prompt_parts.append(f"👥 人流信息：{' | '.join(crowd_info)}")
+            
+            # 处理传统交通数据
+            if mcp_results and 'traffic' in mcp_results and mcp_results['traffic']:
+                traffic = mcp_results['traffic']
+                if isinstance(traffic, dict):  # 确保是字典类型
+                    traffic_info_parts = []
+                    traffic_info_parts.append(f"交通状况：{traffic.get('traffic_status', '未知')}")
+                    traffic_info_parts.append(f"预计时间：{traffic.get('estimated_time', '未知')}")
+                    traffic_info_parts.append(f"推荐路线：{traffic.get('best_route', '未知')}")
+                    prompt_parts.append(f"🚗 交通信息：{' | '.join(traffic_info_parts)}")
+            
+            # 处理详细交通数据（新版）
+            if traffic_info and traffic_info.get("has_traffic_data"):
+                traffic_details = []
+                traffic_details.append(f"状况：{traffic_info.get('traffic_status', '未知')}")
+                traffic_details.append(f"拥堵度：{traffic_info.get('average_congestion', '未知')}")
+                traffic_details.append(f"建议：{traffic_info.get('suggestion', '未知')}")
+                traffic_details.append(f"推荐交通：{traffic_info.get('best_transport', '地铁')}")
+                traffic_details.append(f"预计用时：{traffic_info.get('estimated_time', '未知')}")
+                prompt_parts.append(f"🚦 详细交通信息：{' | '.join(traffic_details)}")
+            
+            # 添加天气预报信息
+            if 'weather_forecast' in mcp_results and mcp_results['weather_forecast']:
+                forecast = mcp_results['weather_forecast']
+                if forecast.get('forecasts'):
+                    forecast_info = []
+                    for day_forecast in forecast['forecasts'][:3]:
+                        date = day_forecast.get('date', '')
+                        day_weather = day_forecast.get('dayweather', '未知')
+                        night_weather = day_forecast.get('nightweather', '未知')
+                        day_temp = day_forecast.get('daytemp', '未知')
+                        night_temp = day_forecast.get('nighttemp', '未知')
+                        forecast_info.append(f"{date}: {day_weather}/{night_weather} {day_temp}°C/{night_temp}°C")
+                    prompt_parts.append(f"📅 未来3天天气预报：{' | '.join(forecast_info)}")
+            
+            prompt_parts.append("\n⚠️ 重要指令：")
+            prompt_parts.append("1. 必须生成完整详细的旅游攻略，不能只列出实时数据")
+            prompt_parts.append("2. 将当前天气和未来天气预报信息自然融入到攻略建议中")
+            prompt_parts.append("3. 根据天气预报调整多日行程安排（如雨天推荐室内活动）")
+            prompt_parts.append("4. 提供具体的游览建议、注意事项、最佳时间安排等")
+            prompt_parts.append("5. 结合实时数据给出个性化建议（如避开人流高峰、选择最佳交通路线）")
         
         # 添加知识库信息
         if knowledge_context:
@@ -268,17 +332,19 @@ class TourismAssistant:
             "",
             f"👤 用户问题：{query}",
             "",
-            "请提供详细、实用的回答，包括：",
+            "请提供详细、实用的攻略回答，包括：",
             "- 直接回答用户问题",
-            "- 结合实时数据给出建议",
-            "- 提供相关的实用信息",
+            "- **必须结合实时天气数据给出游览建议**",
+            "- 根据天气状况调整活动安排和注意事项",
+            "- 提供相关的实用信息和小贴士",
             "- 如果合适，推荐相关景点或活动",
             "",
             "回答要求：",
-            "- 友好、专业的语调",
-            "- 信息准确、具体",
+            "- 友好、专业的旅游攻略语调",
+            "- 信息准确、具体、实用",
             "- 适当使用表情符号增加亲和力",
-            "- 根据实时数据调整建议"
+            "- **天气信息必须融入到攻略建议中，不能只是简单罗列**",
+            "- 根据实时数据调整建议（如雨天推荐室内活动等）"
         ])
         
         return "\n".join(prompt_parts)
@@ -321,44 +387,79 @@ class TourismAssistant:
             # 1. 搜索本地知识库
             knowledge_context = self._search_knowledge_base(query)
             
-            # 2. 判断是否需要MCP服务
+            # 2. 获取实时信息（天气、人流、交通）
             mcp_results = None
-            if self._needs_mcp_services(query):
-                print("🔄 正在获取实时信息...")
-                if hasattr(self, 'mcp_manager'):
+            traffic_info = None
+            should_get_realtime = self._needs_mcp_services(query) or any(keyword in query for keyword in ["攻略", "建议", "推荐", "游览", "去", "玩", "路线", "交通", "怎么去"])
+            
+            if should_get_realtime:
+                print("🔄 正在获取实时信息（天气、人流、交通）...")
+                try:
                     # 提取景点名称
                     attraction = self._extract_attraction_from_query(query)
                     if attraction:
-                        mcp_results = self.mcp_manager.get_targeted_info(attraction, query)
-                else:
-                    # 如果没有mcp_manager，临时创建一个
-                    temp_manager = MCPServiceManager()
-                    attraction = self._extract_attraction_from_query(query)
-                    if attraction:
-                        mcp_results = temp_manager.get_targeted_info(attraction, query)
+                        # 获取天气和人流信息
+                        if hasattr(self, 'mcp_manager'):
+                            mcp_results = self.mcp_manager.get_comprehensive_info(attraction)
+                        else:
+                            temp_manager = MCPServiceManager()
+                            mcp_results = temp_manager.get_comprehensive_info(attraction)
+                        
+                        # 获取交通信息（通过MCP框架）
+                        # 交通信息已经包含在mcp_results中，无需单独获取
+                        traffic_info = None
+                        
+                        if mcp_results:
+                            print("✅ 已获取实时天气、人流、交通数据")
+                        else:
+                            print("⚠️ 无法获取实时数据，将使用基础知识库")
+                        
+                except Exception as e:
+                    print(f"⚠️ 获取实时数据时出错: {e}")
+                    mcp_results = None
+                    traffic_info = None
                 
                 # 如果获取到MCP数据，格式化返回
                 if mcp_results:
                     formatted_mcp = self._format_mcp_response(mcp_results, query)
                     
-                    # 检查是否是纯实时信息查询
-                    realtime_keywords = ["天气", "人流", "交通", "现在", "实时", "当前"]
-                    if any(keyword in query for keyword in realtime_keywords) and not knowledge_context:
+                    # 只有在非常明确的纯实时信息查询时才直接返回MCP数据
+                    # 比如"外滩现在天气"，"东方明珠人流状况"等
+                    pure_realtime_keywords = ["现在天气", "实时天气", "人流状况", "交通状况", "现在情况"]
+                    is_pure_realtime = any(keyword in query for keyword in pure_realtime_keywords)
+                    
+                    # 如果包含"攻略"、"建议"、"推荐"等词，则一定要生成完整回答
+                    needs_full_guide = any(keyword in query for keyword in ["攻略", "建议", "推荐", "规划", "游览", "怎么玩", "去玩"])
+                    
+                    # 只有在明确的纯实时查询且没有攻略需求时才直接返回
+                    if is_pure_realtime and not needs_full_guide and not knowledge_context:
                         return formatted_mcp
             
-            # 3. 创建增强提示词
-            enhanced_prompt = self._create_enhanced_prompt(query, knowledge_context, mcp_results)
+            # 3. 创建增强提示词（包含交通信息）
+            enhanced_prompt = self._create_enhanced_prompt(query, knowledge_context, mcp_results, traffic_info)
             
             # 4. 调用AI生成回复
             ai_response = self._call_doubao_api(enhanced_prompt)
             
-            # 5. 如果有MCP数据，在AI回复后添加实时信息
-            if mcp_results and "API" not in ai_response:  # 确保AI调用成功
-                if hasattr(self, 'mcp_manager'):
-                    formatted_mcp = self.mcp_manager.format_response(mcp_results, query)
-                else:
-                    formatted_mcp = temp_manager.format_response(mcp_results, query)
-                return f"{ai_response}\n\n{'-'*30}\n💡 实时信息补充：\n{formatted_mcp}"
+            # 5. 如果有实时数据，在AI回复后添加实时信息
+            if (mcp_results or traffic_info) and "API" not in ai_response:  # 确保AI调用成功
+                realtime_info = []
+                
+                # 添加MCP信息（天气、人流）
+                if mcp_results:
+                    if hasattr(self, 'mcp_manager'):
+                        formatted_mcp = self.mcp_manager.format_response(mcp_results, query)
+                    else:
+                        formatted_mcp = temp_manager.format_response(mcp_results, query)
+                    realtime_info.append(formatted_mcp)
+                
+                # 添加交通信息
+                if traffic_info and traffic_info.get("has_traffic_data"):
+                    formatted_traffic = format_traffic_for_agent(traffic_info)
+                    realtime_info.append(formatted_traffic)
+                
+                if realtime_info:
+                    return f"{ai_response}\n\n{'-'*30}\n💡 实时信息补充：\n{chr(10).join(realtime_info)}"
             
             return ai_response
             
@@ -379,29 +480,74 @@ class TourismAssistant:
         return suggestions if suggestions else list(self.shanghai_knowledge["attractions"].keys())
 
     def plan_route(self, attractions, start_time="09:00"):
-        """简单的路线规划"""
+        """智能路线规划，集成实时交通数据和出行建议"""
         if not attractions:
             return "请先选择要游览的景点。"
         
-        # 获取每个景点的实时信息
+        # 获取整条路线的交通分析（使用MCP框架）
+        try:
+            if hasattr(self, 'mcp_manager'):
+                route_traffic_analysis = self.mcp_manager.get_route_traffic_analysis(attractions)
+            else:
+                temp_manager = MCPServiceManager()
+                route_traffic_analysis = temp_manager.get_route_traffic_analysis(attractions)
+            print(f"🚦 路线交通分析完成：{route_traffic_analysis.get('overall_status', '未知')}")
+        except Exception as e:
+            print(f"⚠️ 路线交通分析失败: {e}")
+            route_traffic_analysis = {"overall_status": "未知", "attractions_traffic": []}
+        
+        # 获取每个景点的完整实时信息
         route_plan = []
         current_time = start_time
+        attractions_traffic = route_traffic_analysis.get("attractions_traffic", [])
         
         for i, attraction in enumerate(attractions):
-            # 获取实时人流和交通信息
-            crowd_info = CrowdMCPService.get_crowd_info(attraction)
-            traffic_info = TrafficMCPService.get_traffic_info(attraction)
+            try:
+                # 获取天气和人流信息
+                if hasattr(self, 'mcp_manager'):
+                    weather_info = self.mcp_manager.weather_service.get_weather(attraction)
+                    crowd_info = self.mcp_manager.crowd_service.get_crowd_info(attraction)
+                else:
+                    temp_manager = MCPServiceManager()
+                    weather_info = temp_manager.weather_service.get_weather(attraction)
+                    crowd_info = temp_manager.crowd_service.get_crowd_info(attraction)
+                
+                # 获取对应的交通信息
+                traffic_info = attractions_traffic[i] if i < len(attractions_traffic) else {}
+                
+                route_plan.append({
+                    "order": i + 1,
+                    "attraction": attraction,
+                    "suggested_time": current_time,
+                    "weather": {
+                        "temperature": weather_info.get("temperature", "未知"),
+                        "condition": weather_info.get("weather", "未知"),
+                        "recommendation": weather_info.get("recommendation", "")
+                    },
+                    "crowd_level": crowd_info.get("crowd_level", "未知"),
+                    "traffic": {
+                        "status": traffic_info.get("traffic_status", "未知"),
+                        "suggestion": traffic_info.get("suggestion", "建议使用公共交通"),
+                        "best_transport": traffic_info.get("best_transport", "地铁"),
+                        "congestion": traffic_info.get("average_congestion", "未知")
+                    },
+                    "duration": self.shanghai_knowledge["attractions"].get(attraction, {}).get("duration", "2小时")
+                })
+                
+            except Exception as e:
+                print(f"⚠️ 获取 {attraction} 实时信息失败: {e}")
+                # 使用基础信息
+                route_plan.append({
+                    "order": i + 1,
+                    "attraction": attraction,
+                    "suggested_time": current_time,
+                    "weather": {"temperature": "未知", "condition": "未知", "recommendation": ""},
+                    "crowd_level": "未知",
+                    "traffic": {"status": "未知", "suggestion": "建议使用公共交通", "best_transport": "地铁", "congestion": "未知"},
+                    "duration": self.shanghai_knowledge["attractions"].get(attraction, {}).get("duration", "2小时")
+                })
             
-            route_plan.append({
-                "order": i + 1,
-                "attraction": attraction,
-                "suggested_time": current_time,
-                "crowd_level": crowd_info.get("level_description", "未知"),
-                "traffic": traffic_info.get("congestion_level", "未知"),
-                "duration": self.shanghai_knowledge["attractions"].get(attraction, {}).get("duration", "2小时")
-            })
-            
-            # 简单的时间推进（这里可以更复杂的算法）
+            # 简单的时间推进
             hour, minute = map(int, current_time.split(":"))
             hour += 2  # 假设每个景点需要2小时
             if hour >= 24:

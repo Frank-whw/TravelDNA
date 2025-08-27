@@ -1,0 +1,121 @@
+天气：
+key:e544ab803ee4e148744a8ed5a3055f03
+接口地址：https://restapi.amap.com/v3/weather/weatherInfo
+返回格式：json
+请求方式：get
+请求示例：https://restapi.amap.com/v3/weather/weatherInfo?city=110101&key=<用户key>
+city代码对应参考：D:\Pycharm\PycharmProject\pythonProject\venv\上海旅游\Agent\AMap_adcode_citycode.xlsx
+
+key	string	
+city	string	必填	
+extensions 	string	选填	气象类型
+output	string	选填	返回数据格式类型，默认json
+
+
+交通态势：
+key:425125fef7e244aa380807946ec48776
+
+指定线路交通态势查询
+指定线路交通态势查询 API 服务地址
+URL:https://restapi.amap.com/v3/traffic/status/road?parameters 
+请求方式:GET
+
+parameters 代表的参数包括必填参数和可选参数。所有参数均使用和号字符(&)进行分隔。下面的列表枚举了这些参数及其使用规则：
+名称
+
+含义
+
+规则说明
+
+是否必填
+
+缺省值
+
+key
+
+用户唯一标识 
+
+用户在高德地图官网 申请 Web 服务 API 类型 Key
+
+是
+
+无
+
+sig
+
+签名
+
+选择数字签名认证的付费用户必填,数字签名获取和使用方法
+
+否
+
+无
+
+level 
+
+道路等级 
+
+指定道路等级，下面各值代表的含义：  1：高速（京藏高速）  2：城市快速路、国道(西三环、103 国道)  3：高速辅路（G6 辅路）  4：主要道路（长安街、三环辅路）  5：一般道路（彩和坊路）  6：无名道路  注：以上值是包含关系，如 5 除自身道路以外还包含 1，2，3，4 的道路 
+
+是
+
+无
+
+name 
+
+街道名 
+
+道路名称
+
+是
+
+无
+
+city
+
+城市名
+
+由于开发者可能对城市称呼和高德的称呼存在差异（例如开发者称呼为深圳，但高德仅识别深圳市）。  故强烈建议使用 adcode，不使用 city 字段 
+
+city 和 adcode 必填一个
+
+无
+
+adcode
+
+城市编码 
+
+由于开发者可能对城市称呼和高德的称呼存在差异（例如开发者称呼为深圳，但高德仅识别深圳市）。  故强烈建议使用 adcode，不使用 city 字段 
+
+adcode 信息可参考 城市编码表 获取
+
+city 和 adcode 必填一个
+
+无
+
+output 
+
+返回数据格式类型 
+
+可选：JSON、XML
+
+否
+
+JSON
+
+extensions
+
+控制返回内容
+
+可选：base，all
+
+base：返回基本信息
+
+all：返回基本+详细信息
+
+否
+
+base 
+
+服务示例
+https://restapi.amap.com/v3/traffic/status/road?name=北环大道&adcode=440300&key=<用户的key>

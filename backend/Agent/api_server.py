@@ -60,10 +60,11 @@ def init_services():
         tourism_assistant = TourismAssistant(use_enhanced=True)
         assistant_initialized = tourism_assistant.initialize_enhanced_system()
         
-        # 初始化MCP服务管理器
+        # 初始化MCP服务管理器（包含交通MCP服务）
         mcp_manager = MCPServiceManager()
         
         logger.info(f"✅ 服务初始化完成 - AI助手: {'可用' if assistant_initialized else '不可用'}")
+        logger.info(f"🚦 MCP服务管理器: 已初始化（包含天气、人流、交通MCP）")
         return True
         
     except Exception as e:
@@ -162,9 +163,9 @@ def get_service_status():
         data={
             "service_status": status,
             "data_statistics": data_stats,
-            "api_info": {
+                            "api_info": {
                 "rate_limit": API_RATE_LIMIT,
-                "supported_methods": ["chat", "realtime", "attractions", "planning"]
+                "supported_methods": ["chat", "realtime", "attractions", "planning", "traffic"]
             }
         },
         message="状态获取成功"
@@ -246,6 +247,62 @@ def chat():
             success=False,
             message="AI服务暂时不可用，请稍后再试",
             error_code="AI_SERVICE_ERROR"
+        ), 500
+
+@app.route('/api/weather/<location>', methods=['GET'])
+@error_handler
+def get_weather_info(location):
+    """获取指定地点的天气信息"""
+    if not mcp_manager:
+        return api_response(
+            success=False,
+            message="天气服务不可用",
+            error_code="WEATHER_SERVICE_UNAVAILABLE"
+        ), 503
+    
+    city = request.args.get('city', '上海')
+    forecast = request.args.get('forecast', 'false').lower() == 'true'
+    
+    try:
+        if forecast:
+            # 获取天气预报
+            weather_data = mcp_manager.weather_service.get_weather_forecast(city)
+        else:
+            # 获取当前天气
+            weather_data = mcp_manager.weather_service.get_weather(location, city)
+        
+        response_data = {
+            "location": location,
+            "city": city,
+            "weather_data": weather_data,
+            "forecast": forecast
+        }
+        
+        return api_response(
+            data=response_data,
+            message="天气信息获取成功"
+        )
+        
+    except ValueError as e:
+        logger.error(f"参数错误: {e}")
+        return api_response(
+            success=False,
+            message=f"参数错误: {str(e)}",
+            error_code="INVALID_PARAMETER"
+        ), 400
+    except RuntimeError as e:
+        logger.error(f"天气API调用失败: {e}")
+        return api_response(
+            success=False,
+            message=f"天气API调用失败: {str(e)}",
+            error_code="WEATHER_API_ERROR"
+        ), 502
+    except Exception as e:
+        logger.error(f"获取天气信息失败: {e}")
+        return api_response(
+            success=False,
+            message=f"天气信息获取失败: {str(e)}",
+            error_code="WEATHER_DATA_ERROR"
         ), 500
 
 @app.route('/api/realtime/<attraction>', methods=['GET'])
@@ -396,6 +453,75 @@ def plan_route():
             error_code="ROUTE_PLANNING_ERROR"
         ), 500
 
+@app.route('/api/traffic/attraction/<string:attraction>', methods=['GET'])
+@error_handler
+def query_attraction_traffic_api(attraction):
+    """查询景点周边交通状况 - MCP框架"""
+    if not mcp_manager:
+        return api_response(
+            success=False,
+            message="MCP服务不可用",
+            error_code="MCP_SERVICE_UNAVAILABLE"
+        ), 503
+    
+    try:
+        # 通过MCP框架获取景点交通状况
+        result = mcp_manager.traffic_service.get_traffic_info(attraction)
+        
+        return api_response(
+            data=result,
+            message="景点交通查询成功"
+        )
+        
+    except Exception as e:
+        logger.error(f"景点交通查询失败: {e}")
+        return api_response(
+            success=False,
+            message=f"景点交通查询失败: {str(e)}",
+            error_code="ATTRACTION_TRAFFIC_QUERY_ERROR"
+        ), 500
+
+@app.route('/api/traffic/route', methods=['POST'])
+@error_handler
+@validate_request(['attractions'])
+def analyze_route_traffic():
+    """分析路线交通状况 - MCP框架"""
+    if not mcp_manager:
+        return api_response(
+            success=False,
+            message="MCP服务不可用",
+            error_code="MCP_SERVICE_UNAVAILABLE"
+        ), 503
+    
+    data = request.get_json()
+    attractions = data.get('attractions', [])
+    
+    if not attractions or not isinstance(attractions, list):
+        return api_response(
+            success=False,
+            message="attractions参数必须是非空数组",
+            error_code="INVALID_ATTRACTIONS_PARAMETER"
+        ), 400
+    
+    try:
+        # 通过MCP框架分析路线交通
+        result = mcp_manager.get_route_traffic_analysis(attractions)
+        
+        return api_response(
+            data=result,
+            message=f"路线交通分析完成，涉及{len(attractions)}个景点"
+        )
+        
+    except Exception as e:
+        logger.error(f"路线交通分析失败: {e}")
+        return api_response(
+            success=False,
+            message=f"路线分析失败: {str(e)}",
+            error_code="ROUTE_TRAFFIC_ANALYSIS_ERROR"
+        ), 500
+
+
+
 @app.route('/api/history/<user_id>', methods=['GET'])
 @error_handler
 def get_chat_history(user_id):
@@ -512,11 +638,15 @@ if __name__ == '__main__':
     print("  GET  /                    - 健康检查")
     print("  GET  /api/status          - 服务状态")
     print("  POST /api/chat            - 智能对话")
+    print("  GET  /api/weather/<name>  - 天气信息")
     print("  GET  /api/realtime/<name> - 实时信息")
     print("  GET  /api/attractions     - 景点列表")
     print("  POST /api/planning        - 路线规划")
     print("  GET  /api/history/<id>    - 对话历史")
     print("  GET  /api/config          - 系统配置")
+    print("  🚦 交通MCP服务API:")
+    print("  GET      /api/traffic/attraction/<>  - 景点周边交通(MCP)")
+    print("  POST     /api/traffic/route          - 路线交通分析(MCP)")
     
     print("\n🚀 启动Flask开发服务器...")
     print("🌐 访问地址: http://localhost:5000")
