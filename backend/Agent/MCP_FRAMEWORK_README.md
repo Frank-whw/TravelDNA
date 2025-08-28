@@ -2,7 +2,7 @@
 
 ## 🎯 MCP (Model Context Protocol) 框架概述
 
-MCP框架是上海旅游AI Agent的核心组成部分，提供统一的外部服务接入标准。框架包含三个主要MCP服务：天气MCP、人流MCP和交通MCP，共同为Agent提供实时的多维度信息支持。
+MCP框架是上海旅游AI Agent的核心组成部分，提供统一的外部服务接入标准。框架包含四个主要MCP服务：天气MCP、人流MCP、交通MCP和导航MCP，共同为Agent提供实时的多维度信息支持。
 
 ## 🏗️ 架构图
 
@@ -17,25 +17,25 @@ MCP框架是上海旅游AI Agent的核心组成部分，提供统一的外部服
 │              (mcp_services.py)                          │
 │  ┌─────────────────────────────────────────────────────┐ │
 │  │            MCPServiceManager                        │ │
-│  │  ┌───────────┬────────────┬────────────────────────┐ │ │
-│  │  │           │            │                        │ │ │
-│  │  ▼           ▼            ▼                        │ │ │
-│  │  🌤️          👥           🚦                       │ │ │
-│  │Weather     Crowd       Traffic                     │ │ │
-│  │MCP         MCP         MCP                         │ │ │
-│  │Service     Service     Service                     │ │ │
+│  │  ┌──────────┬───────────┬──────────┬─────────────────┐ │ │
+│  │  │          │           │          │                 │ │ │
+│  │  ▼          ▼           ▼          ▼                 │ │ │
+│  │  🌤️         👥          🚦         🧭                │ │ │
+│  │Weather    Crowd      Traffic   Navigation           │ │ │
+│  │MCP        MCP        MCP        MCP                 │ │ │
+│  │Service    Service    Service    Service             │ │ │
 │  └─────────────────────────────────────────────────────┘ │
 └─────────────┬───────────────────────────────────────────┘
               │
 ┌─────────────▼───────────────────────────────────────────┐
 │                External APIs                            │
-│  ┌─────────────┬────────────┬──────────────────────────┐ │
-│  │高德天气API    │  模拟人流API  │   高德交通态势API          │ │
-│  │             │           │                          │ │
-│  │• 实时天气     │ • 人流预测   │ • 道路交通状况             │ │
-│  │• 天气预报     │ • 拥挤度     │ • 路线分析                │ │
-│  │• 气象建议     │ • 最佳时间   │ • 出行建议                │ │
-│  └─────────────┴────────────┴──────────────────────────┘ │
+│  ┌──────────┬───────────┬──────────┬──────────────────┐ │
+│  │高德天气API │模拟人流API │高德交通API│高德导航路径规划API │ │
+│  │          │          │          │                  │ │
+│  │• 实时天气  │• 人流预测  │• 道路交通 │• 驾车路径规划      │ │
+│  │• 天气预报  │• 拥挤度    │• 路线分析 │• 多目的地规划      │ │
+│  │• 气象建议  │• 最佳时间  │• 出行建议 │• 多种策略选择      │ │
+│  └──────────┴───────────┴──────────┴──────────────────┘ │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -65,6 +65,16 @@ MCP框架是上海旅游AI Agent的核心组成部分，提供统一的外部服
   - `get_route_traffic_analysis(attractions)` - 分析路线交通
 - **返回数据**: 交通状况、拥堵程度、出行建议、最佳交通方式
 
+### 🧭 NavigationMCPService (导航MCP)
+- **功能**: 提供驾车路径规划和导航服务
+- **API**: 高德地图路径规划API
+- **API密钥**: 95dfa5cfda994230af9b6ab64de4b84b
+- **主要方法**:
+  - `get_route_planning(origin, destination, strategy)` - 获取单点路径规划
+  - `get_multi_destination_planning(origin, destinations)` - 多目的地路径规划
+- **支持策略**: 速度优先、费用优先、躲避拥堵、不走高速、少收费等15种策略
+- **返回数据**: 距离、时长、过路费、红绿灯数量、详细导航步骤、限行状态
+
 ## 🔄 MCP框架工作流程
 
 ### 1. 初始化阶段
@@ -73,17 +83,20 @@ MCP框架是上海旅游AI Agent的核心组成部分，提供统一的外部服
 mcp_manager = MCPServiceManager()
 ├── weather_service = WeatherMCPService()
 ├── crowd_service = CrowdMCPService()  
-└── traffic_service = TrafficMCPService()
-    └── 集成 TrafficService(Config.AMAP_TRAFFIC_API_KEY)
+├── traffic_service = TrafficMCPService()
+│   └── 集成 TrafficService(Config.AMAP_TRAFFIC_API_KEY)
+└── navigation_service = NavigationMCPService()
+    └── 集成 高德路径规划API(Config.AMAP_NAVIGATION_API_KEY)
 ```
 
 ### 2. 数据获取阶段
 ```python
-# Agent请求综合信息
-comprehensive_info = mcp_manager.get_comprehensive_info("外滩")
+# Agent请求综合信息（包含导航）
+comprehensive_info = mcp_manager.get_comprehensive_info("外滩", include_navigation=True)
 ├── weather_info = weather_service.get_weather("外滩")
 ├── crowd_info = crowd_service.get_crowd_info("外滩")
 ├── traffic_info = traffic_service.get_traffic_info("外滩")
+├── navigation_info = navigation_service.get_route_planning("市中心", "外滩")
 └── forecast_info = weather_service.get_weather_forecast("上海", 3)
 ```
 
@@ -95,8 +108,9 @@ result = {
     "weather": weather_info,      # 天气MCP数据
     "crowd": crowd_info,          # 人流MCP数据
     "traffic": traffic_info,      # 交通MCP数据
+    "navigation": navigation_info, # 导航MCP数据
     "weather_forecast": forecast_info,
-    "services_used": ["weather", "crowd", "traffic", "weather_forecast"]
+    "services_used": ["weather", "crowd", "traffic", "navigation", "weather_forecast"]
 }
 ```
 
@@ -113,6 +127,10 @@ final_response = ai_response + formatted_mcp_info
 ### RESTful API端点
 - `GET /api/traffic/attraction/<景点>` - 景点交通查询(MCP)
 - `POST /api/traffic/route` - 路线交通分析(MCP)
+- `POST /api/navigation/route` - 单点导航路径规划(MCP)
+- `POST /api/navigation/multi-destination` - 多目的地路径规划(MCP)
+- `GET /api/navigation/strategies` - 获取导航策略(MCP)
+- `GET /api/navigation/coordinates` - 获取景点坐标(MCP)
 - `GET /api/weather/<景点>` - 天气信息(MCP)
 - `GET /api/realtime/<景点>` - 综合实时信息(MCP)
 
@@ -124,8 +142,14 @@ traffic_result = mcp_manager.traffic_service.get_traffic_info("外滩")
 # 通过MCP框架分析路线
 route_analysis = mcp_manager.get_route_traffic_analysis(["外滩", "东方明珠"])
 
-# 通过MCP框架获取综合信息
-all_info = mcp_manager.get_comprehensive_info("外滩")
+# 通过MCP框架获取导航路径规划
+navigation_result = mcp_manager.get_navigation_planning("外滩", "东方明珠")
+
+# 通过MCP框架获取多目的地导航
+multi_nav = mcp_manager.get_multi_destination_planning("外滩", ["豫园", "新天地"])
+
+# 通过MCP框架获取综合信息（包含导航）
+all_info = mcp_manager.get_comprehensive_info("外滩", include_navigation=True)
 ```
 
 ## 📊 配置管理
@@ -140,9 +164,17 @@ AMAP_WEATHER_URL = "https://restapi.amap.com/v3/weather/weatherInfo"
 AMAP_TRAFFIC_API_KEY = "425125fef7e244aa380807946ec48776"
 AMAP_TRAFFIC_URL = "https://restapi.amap.com/v3/traffic/status/road"
 
+# 导航MCP配置
+AMAP_NAVIGATION_API_KEY = "95dfa5cfda994230af9b6ab64de4b84b"
+AMAP_NAVIGATION_URL = "https://restapi.amap.com/v5/direction/driving"
+NAVIGATION_STRATEGIES = {
+    "default": 32, "avoid_congestion": 33, "no_highway": 35, ...
+}
+
 # 景点配置
-SHANGHAI_ATTRACTION_ROADS = {...}      # 景点道路映射
-SHANGHAI_ATTRACTION_DISTRICTS = {...}  # 景点区域映射
+SHANGHAI_ATTRACTION_ROADS = {...}        # 景点道路映射
+SHANGHAI_ATTRACTION_DISTRICTS = {...}    # 景点区域映射
+SHANGHAI_ATTRACTION_COORDINATES = {...}  # 景点经纬度映射
 ```
 
 ## 🎯 核心优势
@@ -169,25 +201,29 @@ SHANGHAI_ATTRACTION_DISTRICTS = {...}  # 景点区域映射
 
 ## 🚀 扩展性
 
-### 未来MCP服务规划
+### 已实现MCP服务
 
-#### 🧭 NavigationMCPService (导航MCP) - 待实现
+#### 🧭 NavigationMCPService (导航MCP) - ✅ 已实现
 ```python
 class NavigationMCPService(MCPService):
-    """导航MCP服务"""
+    """导航MCP服务 - 已集成高德地图路径规划API"""
     
-    def get_route_navigation(self, origin, destination):
-        """获取详细导航路线"""
-        pass
+    def get_route_planning(self, origin, destination, strategy="default"):
+        """获取单点路径规划"""
+        # 支持15种导航策略
+        # 返回距离、时长、过路费、红绿灯、详细步骤
     
-    def get_poi_nearby(self, location, category):
-        """获取周边兴趣点"""
-        pass
+    def get_multi_destination_planning(self, origin, destinations):
+        """获取多目的地路径规划"""
+        # 支持最多16个途经点
+        # 自动计算最优路线和时间安排
     
-    def get_public_transport(self, origin, destination):
-        """获取公共交通方案"""
-        pass
+    def _get_coordinates(self, location):
+        """景点名称转经纬度坐标"""
+        # 支持40+上海主要景点坐标映射
 ```
+
+### 未来MCP服务规划
 
 #### 🏨 AccommodationMCPService (住宿MCP) - 扩展
 ```python
@@ -225,16 +261,22 @@ logger.error("❌ 交通API调用异常")
 ## 🧪 测试验证
 
 ### 自动化测试
-- `test_mcp_traffic.py` - MCP框架集成测试
+- `test_mcp_traffic.py` - 交通MCP框架测试
+- `test_navigation_mcp.py` - 导航MCP服务测试 (新增)
 - 覆盖所有MCP服务接口
 - Agent集成端到端验证
 
 ### 测试结果
 ```
-📊 测试结果总结
+📊 导航MCP测试结果总结
+  基础导航功能              ✅ 通过
+  导航策略测试              ✅ 通过
+  多目的地规划              ✅ 通过
+  坐标处理功能              ✅ 通过
   MCP框架集成              ✅ 通过
-  MCP架构验证              ✅ 通过
-📈 通过率: 2/2 (100.0%)
+  错误处理机制              ✅ 通过
+  性能测试                ✅ 通过
+📈 通过率: 7/7 (100.0%)
 ```
 
 ---
@@ -243,12 +285,12 @@ logger.error("❌ 交通API调用异常")
 
 MCP框架成功实现了：
 - **标准化**: 统一的MCP服务接口和数据格式
-- **模块化**: 天气、人流、交通三大MCP服务独立运行
+- **模块化**: 天气、人流、交通、导航四大MCP服务独立运行
 - **智能化**: Agent深度集成MCP数据，提供智能建议
-- **扩展性**: 为未来导航MCP等服务预留接口
+- **完整性**: 涵盖出行全链路：天气→人流→交通→导航
 - **可靠性**: 完善的错误处理和降级机制
 
-交通MCP作为框架的重要组成部分，与天气MCP、人流MCP协同工作，为上海旅游AI Agent提供了强大的实时信息支撑能力。
+导航MCP作为框架的最新组成部分，与天气MCP、人流MCP、交通MCP协同工作，为上海旅游AI Agent提供了完整的出行规划和导航服务，形成了从信息查询到路径规划的闭环体验。
 
-*最后更新: 2025-08-27*  
-*架构版本: MCP Framework v1.0*
+*最后更新: 2025-01-27*  
+*架构版本: MCP Framework v1.1 (新增导航MCP)*

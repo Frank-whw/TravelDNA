@@ -19,6 +19,7 @@ from model import TourismAssistant
 from config import Config
 from data_loader import get_data_statistics
 from mcp_services import MCPServiceManager
+from travel_agent import TravelAgentService, TravelPreference
 
 # 配置日志
 logging.basicConfig(
@@ -51,7 +52,7 @@ user_sessions = {}
 
 def init_services():
     """初始化服务"""
-    global tourism_assistant, mcp_manager, assistant_initialized
+    global tourism_assistant, mcp_manager, travel_agent, assistant_initialized
     
     try:
         logger.info("🚀 正在初始化上海旅游AI服务...")
@@ -63,8 +64,12 @@ def init_services():
         # 初始化MCP服务管理器（包含交通MCP服务）
         mcp_manager = MCPServiceManager()
         
+        # 初始化智能旅游攻略规划服务
+        travel_agent = TravelAgentService()
+        
         logger.info(f"✅ 服务初始化完成 - AI助手: {'可用' if assistant_initialized else '不可用'}")
-        logger.info(f"🚦 MCP服务管理器: 已初始化（包含天气、人流、交通MCP）")
+        logger.info(f"🚦 MCP服务管理器: 已初始化（包含天气、人流、交通、导航MCP）")
+        logger.info(f"🎯 智能旅游攻略规划服务: 已初始化")
         return True
         
     except Exception as e:
@@ -165,7 +170,7 @@ def get_service_status():
             "data_statistics": data_stats,
                             "api_info": {
                 "rate_limit": API_RATE_LIMIT,
-                "supported_methods": ["chat", "realtime", "attractions", "planning", "traffic"]
+                "supported_methods": ["chat", "realtime", "attractions", "planning", "traffic", "navigation"]
             }
         },
         message="状态获取成功"
@@ -520,6 +525,435 @@ def analyze_route_traffic():
             error_code="ROUTE_TRAFFIC_ANALYSIS_ERROR"
         ), 500
 
+@app.route('/api/navigation/route', methods=['POST'])
+@error_handler
+@validate_request(['origin', 'destination'])
+def get_navigation_route():
+    """获取驾车导航路线 - 导航MCP服务"""
+    if not mcp_manager:
+        return api_response(
+            success=False,
+            message="导航服务不可用",
+            error_code="NAVIGATION_SERVICE_UNAVAILABLE"
+        ), 503
+    
+    data = request.get_json()
+    origin = data.get('origin')
+    destination = data.get('destination')
+    strategy = data.get('strategy', 'default')
+    waypoints = data.get('waypoints', [])
+    avoid_polygons = data.get('avoid_polygons', [])
+    plate = data.get('plate')
+    cartype = data.get('cartype', 0)
+    
+    try:
+        # 通过导航MCP服务获取路径规划
+        result = mcp_manager.get_navigation_planning(
+            origin=origin,
+            destination=destination,
+            strategy=strategy,
+            waypoints=waypoints,
+            avoid_polygons=avoid_polygons,
+            plate=plate,
+            cartype=cartype
+        )
+        
+        return api_response(
+            data=result,
+            message=f"导航路线规划成功：{origin} → {destination}"
+        )
+        
+    except Exception as e:
+        logger.error(f"导航路线规划失败: {e}")
+        return api_response(
+            success=False,
+            message=f"导航路线规划失败: {str(e)}",
+            error_code="NAVIGATION_ROUTE_ERROR"
+        ), 500
+
+@app.route('/api/navigation/multi-destination', methods=['POST'])
+@error_handler
+@validate_request(['origin', 'destinations'])
+def get_multi_destination_navigation():
+    """多目的地导航路线规划 - 导航MCP服务"""
+    if not mcp_manager:
+        return api_response(
+            success=False,
+            message="导航服务不可用",
+            error_code="NAVIGATION_SERVICE_UNAVAILABLE"
+        ), 503
+    
+    data = request.get_json()
+    origin = data.get('origin')
+    destinations = data.get('destinations', [])
+    strategy = data.get('strategy', 'default')
+    
+    if not destinations or not isinstance(destinations, list):
+        return api_response(
+            success=False,
+            message="destinations参数必须是非空数组",
+            error_code="INVALID_DESTINATIONS_PARAMETER"
+        ), 400
+    
+    try:
+        # 通过导航MCP服务获取多目的地路径规划
+        result = mcp_manager.get_multi_destination_planning(
+            origin=origin,
+            destinations=destinations,
+            strategy=strategy
+        )
+        
+        return api_response(
+            data=result,
+            message=f"多目的地路线规划成功：{origin} → {' → '.join(destinations)}"
+        )
+        
+    except Exception as e:
+        logger.error(f"多目的地路线规划失败: {e}")
+        return api_response(
+            success=False,
+            message=f"多目的地路线规划失败: {str(e)}",
+            error_code="MULTI_DESTINATION_NAVIGATION_ERROR"
+        ), 500
+
+@app.route('/api/navigation/strategies', methods=['GET'])
+@error_handler
+def get_navigation_strategies():
+    """获取可用的导航策略"""
+    try:
+        strategies_info = {
+            "available_strategies": list(Config.NAVIGATION_STRATEGIES.keys()),
+            "strategy_descriptions": {
+                "speed_priority": "速度优先（仅1条路线）",
+                "cost_priority": "费用优先（仅1条，不走收费路）",
+                "regular_fastest": "常规最快（仅1条，综合距离/耗时）",
+                "default": "默认（高德推荐，同APP默认）",
+                "avoid_congestion": "躲避拥堵",
+                "highway_priority": "高速优先",
+                "no_highway": "不走高速",
+                "less_fee": "少收费",
+                "main_road": "大路优先",
+                "fastest": "速度最快",
+                "avoid_congestion_highway": "躲避拥堵+高速优先",
+                "avoid_congestion_no_highway": "躲避拥堵+不走高速",
+                "avoid_congestion_less_fee": "躲避拥堵+少收费",
+                "less_fee_no_highway": "少收费+不走高速",
+                "comprehensive_avoid": "躲避拥堵+少收费+不走高速",
+                "avoid_congestion_main": "躲避拥堵+大路优先",
+                "avoid_congestion_fastest": "躲避拥堵+速度最快"
+            },
+            "default_strategy": "default",
+            "vehicle_types": Config.NavigationConfig.VEHICLE_TYPES
+        }
+        
+        return api_response(
+            data=strategies_info,
+            message="导航策略信息获取成功"
+        )
+        
+    except Exception as e:
+        logger.error(f"获取导航策略失败: {e}")
+        return api_response(
+            success=False,
+            message="导航策略信息获取失败",
+            error_code="NAVIGATION_STRATEGIES_ERROR"
+        ), 500
+
+@app.route('/api/navigation/coordinates', methods=['GET'])
+@error_handler
+def get_attraction_coordinates():
+    """获取景点坐标信息"""
+    attraction = request.args.get('attraction')
+    
+    try:
+        if attraction:
+            # 获取指定景点的坐标
+            coords = Config.SHANGHAI_ATTRACTION_COORDINATES.get(attraction)
+            if coords:
+                data = {
+                    "attraction": attraction,
+                    "coordinates": coords,
+                    "formatted": {
+                        "longitude": coords.split(',')[0],
+                        "latitude": coords.split(',')[1]
+                    }
+                }
+                message = f"景点 {attraction} 坐标获取成功"
+            else:
+                return api_response(
+                    success=False,
+                    message=f"未找到景点 {attraction} 的坐标信息",
+                    error_code="ATTRACTION_NOT_FOUND"
+                ), 404
+        else:
+            # 返回所有景点的坐标
+            data = {
+                "all_coordinates": Config.SHANGHAI_ATTRACTION_COORDINATES,
+                "total_attractions": len(Config.SHANGHAI_ATTRACTION_COORDINATES)
+            }
+            message = "所有景点坐标获取成功"
+        
+        return api_response(
+            data=data,
+            message=message
+        )
+        
+    except Exception as e:
+        logger.error(f"获取景点坐标失败: {e}")
+        return api_response(
+            success=False,
+            message="景点坐标信息获取失败",
+            error_code="COORDINATES_RETRIEVAL_ERROR"
+        ), 500
+
+    # =============================================
+    # 智能旅游攻略规划 API
+    # =============================================
+    
+    @app.route('/api/travel-plan/create', methods=['POST'])
+    @error_handler
+    def create_travel_plan():
+        """创建智能旅游攻略"""
+        data = request.get_json()
+        
+        origin = data.get('origin', '')
+        destinations = data.get('destinations', [])
+        date = data.get('date')
+        
+        if not origin or not destinations:
+            return api_response(
+                success=False,
+                message="起点和目的地不能为空",
+                error_code="MISSING_REQUIRED_PARAMS"
+            ), 400
+        
+        try:
+            # 解析用户偏好
+            preferences_data = data.get('preferences', {})
+            preferences = TravelPreference()
+            
+            # 创建旅游计划
+            travel_plan = travel_agent.create_travel_plan(
+                origin=origin,
+                destinations=destinations,
+                user_preferences=preferences,
+                date=date
+            )
+            
+            plan_data = {
+                'plan_id': travel_plan.plan_id,
+                'origin': travel_plan.origin,
+                'destinations': travel_plan.destinations,
+                'total_duration': travel_plan.total_duration,
+                'total_distance': travel_plan.total_distance,
+                'overall_score': travel_plan.overall_score,
+                'weather_compatibility': travel_plan.weather_compatibility,
+                'traffic_score': travel_plan.traffic_score,
+                'crowd_score': travel_plan.crowd_score,
+                'recommendations': travel_plan.recommendations,
+                'adjustments': travel_plan.adjustments,
+                'timestamp': travel_plan.timestamp,
+                'formatted_plan': travel_agent.format_travel_plan(travel_plan)
+            }
+            
+            return api_response(
+                data=plan_data,
+                message="智能旅游攻略创建成功"
+            )
+            
+        except Exception as e:
+            logger.error(f"创建旅游攻略失败: {e}")
+            return api_response(
+                success=False,
+                message="智能旅游攻略创建失败",
+                error_code="TRAVEL_PLAN_CREATION_ERROR"
+            ), 500
+    
+    @app.route('/api/travel-plan/history', methods=['GET'])
+    @error_handler
+    def get_plan_history():
+        """获取用户的旅游计划历史"""
+        try:
+            plans = [
+                {
+                    'plan_id': plan.plan_id,
+                    'origin': plan.origin,
+                    'destinations': plan.destinations,
+                    'overall_score': plan.overall_score,
+                    'total_duration': plan.total_duration,
+                    'total_distance': plan.total_distance,
+                    'timestamp': plan.timestamp
+                }
+                for plan in travel_agent.plan_history
+            ]
+            
+            return api_response(
+                data={
+                    'plans': plans,
+                    'count': len(plans)
+                },
+                message="旅游计划历史获取成功"
+            )
+            
+        except Exception as e:
+            logger.error(f"获取计划历史失败: {e}")
+            return api_response(
+                success=False,
+                message="获取计划历史失败",
+                error_code="PLAN_HISTORY_ERROR"
+            ), 500
+
+    # =============================================
+    # POI搜索 API
+    # =============================================
+    
+    @app.route('/api/poi/search', methods=['GET'])
+    @error_handler
+    def search_poi_by_keyword():
+        """关键字搜索POI"""
+        keywords = request.args.get('keywords', '')
+        region = request.args.get('region', '上海')
+        types = request.args.get('types', '')  # POI类型，用|分隔
+        page_size = int(request.args.get('page_size', 10))
+        
+        if not keywords:
+            return api_response(
+                success=False,
+                message="关键字不能为空",
+                error_code="MISSING_KEYWORDS"
+            ), 400
+        
+        try:
+            # 解析POI类型
+            poi_types = None
+            if types:
+                poi_types = types.split('|')
+            
+            # 调用POI搜索服务
+            result = mcp_manager.search_poi_by_keyword(
+                keywords=keywords,
+                region=region,
+                types=poi_types,
+                page_size=min(page_size, 25)
+            )
+            
+            return api_response(
+                data=result,
+                message="POI搜索成功"
+            )
+            
+        except Exception as e:
+            logger.error(f"POI关键字搜索失败: {e}")
+            return api_response(
+                success=False,
+                message="POI搜索失败",
+                error_code="POI_SEARCH_ERROR"
+            ), 500
+    
+    @app.route('/api/poi/around', methods=['GET'])
+    @error_handler
+    def search_poi_around():
+        """周边搜索POI"""
+        location = request.args.get('location', '')  # 经度,纬度
+        keywords = request.args.get('keywords', '')
+        types = request.args.get('types', '')
+        radius = int(request.args.get('radius', 5000))
+        
+        if not location:
+            return api_response(
+                success=False,
+                message="位置坐标不能为空",
+                error_code="MISSING_LOCATION"
+            ), 400
+        
+        try:
+            # 解析POI类型
+            poi_types = None
+            if types:
+                poi_types = types.split('|')
+            
+            # 调用POI周边搜索服务
+            result = mcp_manager.search_poi_around(
+                location=location,
+                keywords=keywords if keywords else None,
+                types=poi_types,
+                radius=min(radius, 50000)
+            )
+            
+            return api_response(
+                data=result,
+                message="周边POI搜索成功"
+            )
+            
+        except Exception as e:
+            logger.error(f"POI周边搜索失败: {e}")
+            return api_response(
+                success=False,
+                message="周边POI搜索失败",
+                error_code="POI_AROUND_SEARCH_ERROR"
+            ), 500
+    
+    @app.route('/api/poi/recommend', methods=['GET'])
+    @error_handler
+    def get_poi_recommendations():
+        """获取旅游POI推荐"""
+        destination = request.args.get('destination', '')
+        travel_type = request.args.get('travel_type', 'tourism')  # tourism/business/leisure
+        
+        if not destination:
+            return api_response(
+                success=False,
+                message="目的地不能为空",
+                error_code="MISSING_DESTINATION"
+            ), 400
+        
+        try:
+            # 调用POI推荐服务
+            result = mcp_manager.get_poi_recommendations_for_travel(
+                destination=destination,
+                travel_type=travel_type
+            )
+            
+            if "error" in result:
+                return api_response(
+                    success=False,
+                    message=result["error"],
+                    error_code="DESTINATION_NOT_FOUND"
+                ), 404
+            
+            return api_response(
+                data=result,
+                message="POI推荐获取成功"
+            )
+            
+        except Exception as e:
+            logger.error(f"POI推荐获取失败: {e}")
+            return api_response(
+                success=False,
+                message="POI推荐获取失败",
+                error_code="POI_RECOMMEND_ERROR"
+            ), 500
+    
+    @app.route('/api/poi/types', methods=['GET'])
+    @error_handler
+    def get_poi_types():
+        """获取POI类型列表"""
+        try:
+            return api_response(
+                data={
+                    "poi_types": Config.POI_TYPE_CODES,
+                    "default_types": Config.DEFAULT_POI_TYPES
+                },
+                message="POI类型获取成功"
+            )
+            
+        except Exception as e:
+            logger.error(f"获取POI类型失败: {e}")
+            return api_response(
+                success=False,
+                message="获取POI类型失败",
+                error_code="POI_TYPES_ERROR"
+            ), 500
 
 
 @app.route('/api/history/<user_id>', methods=['GET'])
@@ -564,6 +998,7 @@ def get_config():
                 "weather_service": Config.ENABLE_WEATHER_SERVICE,
                 "crowd_service": Config.ENABLE_CROWD_SERVICE,
                 "traffic_service": Config.ENABLE_TRAFFIC_SERVICE,
+                "navigation_service": Config.ENABLE_NAVIGATION_SERVICE,
                 "route_planning": Config.ENABLE_ROUTE_PLANNING
             },
             "limits": {
@@ -647,6 +1082,18 @@ if __name__ == '__main__':
     print("  🚦 交通MCP服务API:")
     print("  GET      /api/traffic/attraction/<>  - 景点周边交通(MCP)")
     print("  POST     /api/traffic/route          - 路线交通分析(MCP)")
+    print("  🧭 导航MCP服务API:")
+    print("  POST     /api/navigation/route              - 单点导航路径规划")
+    print("  POST     /api/navigation/multi-destination  - 多目的地路径规划")
+    print("  GET      /api/navigation/strategies         - 获取导航策略")
+    print("  GET      /api/navigation/coordinates        - 获取景点坐标")
+    print("  🎯 智能旅游攻略规划API:")
+    print("  POST     /api/travel-plan/create            - 创建智能旅游攻略")
+    print("  GET      /api/travel-plan/history           - 获取攻略历史")
+    print("  🔍 POI搜索API:")
+    print("  GET      /api/poi/search                    - 关键字搜索POI")
+    print("  GET      /api/poi/around                    - 周边搜索POI")
+    print("  GET      /api/poi/recommend                 - 获取旅游POI推荐")
     
     print("\n🚀 启动Flask开发服务器...")
     print("🌐 访问地址: http://localhost:5000")

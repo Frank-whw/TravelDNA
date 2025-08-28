@@ -30,14 +30,49 @@ class Config:
     
     # ==================== 高德地图API配置 ====================
     # 高德地图天气API配置
-    AMAP_WEATHER_API_KEY = "eabe457b791e74946b2aeb6a9106b17a"
+    AMAP_WEATHER_API_KEY = os.getenv("AMAP_WEATHER_API_KEY", "")
     AMAP_WEATHER_URL = "https://restapi.amap.com/v3/weather/weatherInfo"
     AMAP_CITY_CODE_FILE = "AMap_adcode_citycode.xlsx"
     
     # 高德地图交通态势API配置
-    AMAP_TRAFFIC_API_KEY = "425125fef7e244aa380807946ec48776"  # 您提供的交通态势API密钥
-    AMAP_TRAFFIC_SECURITY_KEY = "5247e3cdc28d7acfaa1f4504e09a4da1"  # 交通API安全密钥(如果需要签名验证)
+    AMAP_TRAFFIC_API_KEY = os.getenv("AMAP_TRAFFIC_API_KEY", "")
+    AMAP_TRAFFIC_SECURITY_KEY = os.getenv("AMAP_TRAFFIC_SECURITY_KEY", "")
     AMAP_TRAFFIC_URL = "https://restapi.amap.com/v3/traffic/status/road"
+    
+    # 高德地图导航API配置
+    AMAP_NAVIGATION_API_KEY = os.getenv("AMAP_NAVIGATION_API_KEY", "")
+    AMAP_NAVIGATION_URL = "https://restapi.amap.com/v5/direction/driving"
+    AMAP_NAVIGATION_TIMEOUT = 10  # 导航API超时时间(秒)
+    AMAP_NAVIGATION_RATE_LIMIT = 5  # API调用频率(次/秒)，在3次/s基础上适当放宽
+    
+    # 高德地图POI搜索API配置
+    AMAP_POI_API_KEY = os.getenv("AMAP_POI_API_KEY", "")
+    AMAP_POI_TEXT_SEARCH_URL = "https://restapi.amap.com/v5/place/text"  # 关键字搜索
+    AMAP_POI_AROUND_SEARCH_URL = "https://restapi.amap.com/v5/place/around"  # 周边搜索
+    AMAP_POI_POLYGON_SEARCH_URL = "https://restapi.amap.com/v5/place/polygon"  # 多边形区域搜索
+    AMAP_POI_TIMEOUT = 10  # POI搜索API超时时间(秒)
+    AMAP_POI_RATE_LIMIT = 10  # POI搜索API调用频率(次/秒)
+    
+    # 导航策略配置
+    NAVIGATION_STRATEGIES = {
+        "speed_priority": 0,           # 速度优先（仅1条路线）
+        "cost_priority": 1,            # 费用优先（仅1条，不走收费路）
+        "regular_fastest": 2,          # 常规最快（仅1条，综合距离/耗时）
+        "default": 32,                 # 默认（高德推荐，同APP默认）
+        "avoid_congestion": 33,        # 躲避拥堵
+        "highway_priority": 34,        # 高速优先
+        "no_highway": 35,              # 不走高速
+        "less_fee": 36,                # 少收费
+        "main_road": 37,               # 大路优先
+        "fastest": 38,                 # 速度最快
+        "avoid_congestion_highway": 39,      # 躲避拥堵+高速优先
+        "avoid_congestion_no_highway": 40,   # 躲避拥堵+不走高速
+        "avoid_congestion_less_fee": 41,     # 躲避拥堵+少收费
+        "less_fee_no_highway": 42,           # 少收费+不走高速
+        "comprehensive_avoid": 43,           # 躲避拥堵+少收费+不走高速
+        "avoid_congestion_main": 44,         # 躲避拥堵+大路优先
+        "avoid_congestion_fastest": 45       # 躲避拥堵+速度最快
+    }
     
     # 交通态势查询配置
     TRAFFIC_QUERY_TIMEOUT = 10  # 查询超时时间(秒)
@@ -49,6 +84,64 @@ class Config:
         "light": 0.3,      # 轻度拥堵阈值
         "moderate": 0.5,   # 中度拥堵阈值  
         "heavy": 0.7       # 重度拥堵阈值
+    }
+    
+    # 上海景点经纬度配置（用于导航API）
+    SHANGHAI_ATTRACTION_COORDINATES = {
+        # 黄浦区景点
+        "外滩": "121.484429,31.240791",
+        "豫园": "121.492800,31.228831", 
+        "城隍庙": "121.492800,31.228831",
+        "南京路": "121.474311,31.235668",
+        "南京路步行街": "121.474311,31.235668",
+        "人民广场": "121.475049,31.228917",
+        "上海博物馆": "121.475049,31.228917",
+        "上海大剧院": "121.475049,31.228917",
+        "新天地": "121.477419,31.220089",
+        "田子坊": "121.466536,31.211037",
+        
+        # 浦东新区景点
+        "东方明珠": "121.506377,31.245105",
+        "陆家嘴": "121.506377,31.245105",
+        "环球金融中心": "121.506377,31.245105",
+        "金茂大厦": "121.506377,31.245105", 
+        "上海中心": "121.506377,31.245105",
+        "上海科技馆": "121.535530,31.222982",
+        "海洋馆": "121.535530,31.222982",
+        "迪士尼": "121.656084,31.150625",
+        "浦东机场": "121.799320,31.195888",
+        "世博园": "121.506377,31.245105",
+        
+        # 徐汇区景点
+        "徐家汇": "121.427700,31.196742",
+        "淮海路": "121.471569,31.220587",
+        "上海植物园": "121.441354,31.154988",
+        
+        # 长宁区景点
+        "虹桥": "121.350693,31.193895",
+        "虹桥机场": "121.350693,31.193895",
+        "中山公园": "121.418228,31.223577",
+        
+        # 静安区景点
+        "静安寺": "121.444906,31.227906",
+        "上海火车站": "121.458006,31.249162",
+        
+        # 普陀区景点
+        "长风公园": "121.397728,31.252683",
+        
+        # 虹口区景点
+        "四川北路": "121.494382,31.251928",
+        "多伦路": "121.494382,31.251928",
+        "鲁迅公园": "121.494382,31.251928",
+        
+        # 杨浦区景点
+        "复兴公园": "121.471831,31.232407",
+        "共青森林公园": "121.559793,31.305866",
+        
+        # 其他区域
+        "七宝古镇": "121.356476,31.148641",
+        "朱家角": "121.061989,31.114396",
+        "佘山": "121.181250,31.081250"
     }
     
     # 上海景点到区级代码的映射
@@ -179,10 +272,66 @@ class Config:
         "佘山": ["佘山大道", "外青松公路", "辰花路"]
     }
     
+    # POI类型代码配置
+    POI_TYPE_CODES = {
+        # 餐饮服务
+        "restaurant": "050000",           # 餐饮服务总类
+        "chinese_food": "050100",         # 中餐厅
+        "foreign_food": "050200",         # 外国餐厅
+        "fast_food": "050300",            # 快餐厅
+        "cafe": "050500",                 # 咖啡厅
+        "tea_house": "050600",            # 茶艺馆
+        "bar": "050700",                  # 酒吧
+        
+        # 生活服务
+        "life_service": "070000",         # 生活服务总类
+        "shopping": "060000",             # 购物服务
+        "supermarket": "060101",          # 超市
+        "shopping_mall": "060400",        # 购物中心
+        "convenience_store": "060102",    # 便利店
+        
+        # 商务住宅
+        "business": "120000",             # 商务住宅总类
+        "company": "120100",              # 公司企业
+        "hotel": "100000",                # 住宿服务
+        
+        # 交通设施服务
+        "transport": "150000",            # 交通设施服务总类
+        "subway": "150500",               # 地铁站
+        "bus_stop": "150700",             # 公交车站
+        "parking": "150900",              # 停车场
+        "gas_station": "160000",          # 加油站
+        
+        # 旅游景点
+        "scenic_spot": "110000",          # 风景名胜
+        "park": "110101",                 # 公园
+        "museum": "130000",               # 科教文化服务
+        "entertainment": "080000",        # 体育休闲服务
+        
+        # 医疗保健
+        "hospital": "090000",             # 医疗保健服务
+        "pharmacy": "090600",             # 药店
+        
+        # 政府机构
+        "government": "170000",           # 政府机构及社会团体
+        "bank": "160300",                 # 金融保险服务
+    }
+    
+    # 默认搜索类型（常用POI类型）
+    DEFAULT_POI_TYPES = [
+        "050000",  # 餐饮服务
+        "070000",  # 生活服务
+        "120000",  # 商务住宅
+        "110000",  # 风景名胜
+        "080000",  # 体育休闲服务
+    ]
+    
     # 服务开关（用于调试和维护）
     ENABLE_WEATHER_SERVICE = True
     ENABLE_CROWD_SERVICE = True
     ENABLE_TRAFFIC_SERVICE = True
+    ENABLE_NAVIGATION_SERVICE = True
+    ENABLE_POI_SEARCH_SERVICE = True
     
     # ==================== 上海地区配置 ====================
     # 支持的上海景点列表
@@ -304,6 +453,26 @@ class Config:
         ]
         TRANSPORT_TYPES = [
             "地铁", "公交", "出租车", "私家车", "共享单车", "步行"
+        ]
+    
+    class NavigationConfig:
+        """导航服务配置"""
+        API_ENDPOINTS = {
+            "driving": "/navigation/driving",
+            "walking": "/navigation/walking", 
+            "transit": "/navigation/transit"
+        }
+        DEFAULT_STRATEGY = "default"
+        MAX_WAYPOINTS = 16
+        MAX_AVOID_POLYGONS = 32
+        VEHICLE_TYPES = {
+            "fuel": 0,        # 普通燃油汽车
+            "electric": 1,    # 纯电动汽车
+            "hybrid": 2       # 插电式混动汽车
+        }
+        OUTPUT_FIELDS = [
+            "polyline", "restriction", "cost", "distance", 
+            "duration", "strategy", "tolls", "traffic_lights"
         ]
     
     # ==================== 用户体验配置 ====================

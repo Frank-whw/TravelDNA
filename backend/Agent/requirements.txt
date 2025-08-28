@@ -1,29 +1,35 @@
-# 上海旅游AI助手 - MCP服务集成系统依赖
+# 智能旅游攻略Agent - Python依赖包
 
-# 核心依赖
-requests>=2.28.0
-python-dotenv>=1.0.0
-beautifulsoup4>=4.11.0
-pandas>=1.5.0
+# Web框架
+Flask==2.3.3
+Flask-CORS==4.0.0
 
-# RAG检索系统依赖
-jieba>=0.42.1
-numpy>=1.21.0
-scikit-learn>=1.0.0
+# HTTP请求
+requests==2.31.0
 
-# 可选依赖（增强功能）
-# sentence-transformers>=2.2.0  # 向量检索（可选）
-# faiss-cpu>=1.7.0              # 高性能向量搜索（可选）
+# 数据处理
+pandas==2.1.1
+openpyxl==3.1.2
 
-# Flask API服务依赖
-Flask>=2.3.0
-Flask-CORS>=4.0.0
+# 环境变量管理
+python-dotenv==1.0.0
 
-# 原有RAG系统依赖
-langchain==0.1.16 -i https://pypi.tuna.tsinghua.edu.cn/simple
-langchain-community==0.0.34 -i https://pypi.tuna.tsinghua.edu.cn/simple
-chromadb==0.5.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
-sentence-transformers==3.0.1 -i https://pypi.tuna.tsinghua.edu.cn/simple
-unstructured[local-inference]==0.18.13 -i https://pypi.tuna.tsinghua.edu.cn/simple
-transformers==4.41.2 -i https://pypi.tuna.tsinghua.edu.cn/simple
-torch==2.3.1+cu118 --extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple
+# 日期时间处理
+python-dateutil==2.8.2
+
+# 数据验证
+pydantic==2.4.2
+
+# 日志管理
+loguru==0.7.2
+
+# 开发工具（可选）
+pytest==7.4.2
+pytest-cov==4.1.0
+
+# 类型检查（可选）
+mypy==1.6.1
+
+# 代码格式化（可选）
+black==23.9.1
+flake8==6.1.0
