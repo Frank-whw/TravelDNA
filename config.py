@@ -1,211 +1,104 @@
+# -*- coding: utf-8 -*-
 """
-智能旅行攻略规划师配置文件（简化版）
+智能旅行对话Agent配置文件
+包含所有API密钥和系统配置参数
 """
 
 import os
+from typing import Dict, Any
 
-class Config:
-    """系统配置类"""
-    
-    # ==================== 高德地图API配置 ====================
-    # 高德地图天气API配置
-    AMAP_WEATHER_API_KEY = os.getenv("AMAP_WEATHER_API_KEY", "demo_weather_key")
-    AMAP_WEATHER_URL = "https://restapi.amap.com/v3/weather/weatherInfo"
-    
-    # 高德地图交通态势API配置
-    AMAP_TRAFFIC_API_KEY = os.getenv("AMAP_TRAFFIC_API_KEY", "demo_traffic_key")
-    AMAP_TRAFFIC_URL = "https://restapi.amap.com/v3/traffic/status/road"
-    
-    # 高德地图导航API配置
-    AMAP_NAVIGATION_API_KEY = os.getenv("AMAP_NAVIGATION_API_KEY", "demo_navigation_key")
-    AMAP_NAVIGATION_URL = "https://restapi.amap.com/v5/direction/driving"
-    AMAP_NAVIGATION_TIMEOUT = 10
-    AMAP_NAVIGATION_RATE_LIMIT = 5
-    
-    # 高德地图POI搜索API配置
-    AMAP_POI_API_KEY = os.getenv("AMAP_POI_API_KEY", "demo_poi_key")
-    AMAP_POI_TEXT_SEARCH_URL = "https://restapi.amap.com/v5/place/text"
-    AMAP_POI_AROUND_SEARCH_URL = "https://restapi.amap.com/v5/place/around"
-    AMAP_POI_POLYGON_SEARCH_URL = "https://restapi.amap.com/v5/place/polygon"
-    AMAP_POI_TIMEOUT = 10
-    AMAP_POI_RATE_LIMIT = 10
-    
-    # 演示模式开关 - 当API密钥为demo时使用模拟数据
-    USE_DEMO_MODE = True
-    
-    # ==================== 上海景点坐标配置 ====================
-    SHANGHAI_ATTRACTION_COORDINATES = {
-        "外滩": "121.4905,31.2404",
-        "东方明珠": "121.5052,31.2397",
-        "上海迪士尼乐园": "121.6707,31.1505",
-        "人民广场": "121.4737,31.2316",
-        "南京路步行街": "121.4792,31.2350",
-        "豫园": "121.4925,31.2267",
-        "陆家嘴": "121.5078,31.2397",
-        "徐家汇": "121.4418,31.1989",
-        "田子坊": "121.4695,31.2143",
-        "新天地": "121.4759,31.2179",
-        "上海博物馆": "121.4737,31.2283",
-        "上海科技馆": "121.5337,31.2226",
-        "城隍庙": "121.4925,31.2267",
-        "静安寺": "121.4458,31.2221",
-        "淮海路": "121.4695,31.2143",
-        "七宝古镇": "121.3510,31.1424",
-        "朱家角": "121.0506,31.1072",
-        "佘山": "121.1813,31.0989"
-    }
-    
-    # 上海景点对应的区级代码
-    SHANGHAI_ATTRACTION_DISTRICTS = {
-        "外滩": "310101",      # 黄浦区
-        "东方明珠": "310115",  # 浦东新区
-        "迪士尼": "310115",    # 浦东新区
-        "人民广场": "310101",  # 黄浦区
-        "南京路": "310101",    # 黄浦区
-        "豫园": "310101",      # 黄浦区
-        "陆家嘴": "310115",    # 浦东新区
-        "徐家汇": "310104",    # 徐汇区
-        "静安寺": "310106",    # 静安区
-        "新天地": "310101",    # 黄浦区
-        "田子坊": "310101",    # 黄浦区
-    }
-    
-    # ==================== 导航策略配置 ====================
-    NAVIGATION_STRATEGIES = {
-        "default": "0",        # 速度优先（时间）
-        "fastest": "0",        # 速度优先（时间）
-        "shortest": "1",       # 费用优先（不走收费路段的最快道路）
-        "avoid_traffic": "2",  # 距离优先
-        "avoid_highway": "3",  # 速度优先（不走快速路）
-        "avoid_congestion": "4", # 躲避拥堵（不走拥堵路线）
-        "avoid_toll": "5",     # 不走高速
-        "avoid_toll_highway": "6", # 不走高速且避免收费
-        "shortest_time": "7",  # 躲避拥堵和收费
-        "recommend": "8",      # 高德推荐
-        "multi_strategy": "9"  # 多策略（同时使用速度优先、费用优先、距离优先三个策略）
-    }
-    
-    # 导航配置
-    class NavigationConfig:
-        OUTPUT_FIELDS = [
-            "cost", "duration", "restriction", "traffic_lights", 
-            "tolls", "polyline", "steps"
-        ]
-        
-        # 车辆类型
-        CAR_TYPES = {
-            "fuel": 0,      # 燃油车
-            "electric": 1,  # 电动车
-            "hybrid": 2     # 混合动力
-        }
-    
-    # ==================== POI类型配置 ====================
-    POI_TYPE_CODES = {
-        # 餐饮服务
-        "餐饮": "050000",
-        "中餐厅": "050100",
-        "外国餐厅": "050200",
-        "快餐厅": "050300",
-        "休闲餐饮": "050400",
-        "咖啡厅": "050500",
-        "茶艺馆": "050600",
-        "冷饮店": "050700",
-        
-        # 购物服务
-        "购物": "060000",
-        "购物中心": "060100",
-        "超市": "060200",
-        "便民商店": "060300",
-        "家居建材": "060400",
-        "家电数码": "060500",
-        "商铺": "060600",
-        
-        # 生活服务
-        "生活服务": "070000",
-        "旅行社": "070100",
-        "银行": "070200",
-        "ATM": "070300",
-        "邮局": "070400",
-        "快递": "070500",
-        
-        # 体育休闲
-        "体育休闲": "080000",
-        "运动场馆": "080100",
-        "休闲娱乐": "080200",
-        "洗浴推拿": "080300",
-        "KTV": "080400",
-        
-        # 医疗保健
-        "医疗保健": "090000",
-        "综合医院": "090100",
-        "专科医院": "090200",
-        "诊所": "090300",
-        "药店": "090400",
-        
-        # 住宿服务
-        "住宿服务": "100000",
-        "宾馆酒店": "100100",
-        "招待所": "100200",
-        "度假村": "100300",
-        
-        # 风景名胜
-        "风景名胜": "110000",
-        "公园广场": "110101",
-        "风景名胜区": "110102",
-        "动物园": "110200",
-        "植物园": "110300",
-        "游乐园": "110400",
-        "博物馆": "110500",
-        "展览馆": "110600",
-        "会展中心": "110700",
-        "图书馆": "110800",
-        "美术馆": "110900",
-        
-        # 商务住宅
-        "商务住宅": "120000",
-        "商务大厦": "120100",
-        "住宅区": "120200",
-        "政府机构": "120300",
-        
-        # 交通设施
-        "交通设施": "150000",
-        "火车站": "150100",
-        "长途汽车站": "150200",
-        "地铁站": "150300",
-        "公交车站": "150400",
-        "港口": "150500",
-        "机场": "150600",
-        "停车场": "150700"
-    }
-    
-    # 默认POI类型（用于周边搜索）
-    DEFAULT_POI_TYPES = [
-        "050000",  # 餐饮服务
-        "060000",  # 购物服务
-        "110000",  # 风景名胜
-        "080000",  # 体育休闲
-        "100000"   # 住宿服务
-    ]
+# API密钥配置
+API_KEYS = {
+    "DOUBAO_API_KEY": "5325ec5a-dd88-417c-bec6-0963d78e1753",
+    "AMAP_WEATHER_API_KEY": "eabe457b791e74946b2aeb6a9106b17a",
+    "AMAP_TRAFFIC_API_KEY": "425125fef7e244aa380807946ec48776",
+    "AMAP_NAVIGATION_API_KEY": "95dfa5cfda994230af9b6ab64de4b84b",
+    "AMAP_POI_API_KEY": "f2b480c54a1805d9f6d5aa7b845fc360",
+    "AMAP_TRAFFIC_SECURITY_KEY": "425125fef7e244aa380807946ec48776"
+}
 
-def get_city_code(city_name: str) -> str:
-    """获取城市代码（简化版）"""
-    city_codes = {
-        "上海": "310000",
-        "上海市": "310000",
-        "北京": "110000",
-        "北京市": "110000",
-        "广州": "440100",
-        "深圳": "440300",
-        "杭州": "330100",
-        "南京": "320100",
-        "苏州": "320500"
-    }
-    return city_codes.get(city_name, "310000")  # 默认返回上海代码
+# 高德地图API配置
+AMAP_CONFIG = {
+    "base_url": "https://restapi.amap.com/v3",
+    "weather_url": "https://restapi.amap.com/v3/weather/weatherInfo",
+    "traffic_url": "https://restapi.amap.com/v3/traffic/status/rectangle",
+    "navigation_url": "https://restapi.amap.com/v3/direction",
+    "poi_url": "https://restapi.amap.com/v3/place/text",
+    "geocode_url": "https://restapi.amap.com/v3/geocode/geo",
+    "regeocode_url": "https://restapi.amap.com/v3/geocode/regeo"
+}
 
-def get_city_info(city_code: str) -> dict:
-    """获取城市信息（简化版）"""
+# RAG知识库配置
+RAG_CONFIG = {
+    "data_dir": "backend/Agent/data",
+    "max_results": 10,
+    "relevance_threshold": 0.7,
+    "max_cache_age": 3600  # 1小时缓存
+}
+
+# 系统默认配置
+DEFAULT_CONFIG = {
+    "default_travel_days": 3,
+    "default_transport": "公共交通",
+    "default_poi_count": 5,
+    "max_route_options": 2,
+    "weather_cache_time": 3600,  # 天气数据缓存1小时
+    "traffic_cache_time": 1800,  # 路况数据缓存30分钟
+}
+
+# 城市代码映射文件
+CITY_CODE_FILE = "AMap_adcode_citycode.xlsx"
+
+# 日志配置
+LOG_CONFIG = {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file": "agent.log"
+}
+
+# 缓存配置
+CACHE_CONFIG = {
+    "enabled": True,
+    "max_size": 1000,
+    "ttl": 3600  # 默认1小时过期
+}
+
+def get_api_key(service: str) -> str:
+    """获取指定服务的API密钥"""
+    key_name = f"{service.upper()}_API_KEY"
+    return API_KEYS.get(key_name, "")
+
+def get_config() -> Dict[str, Any]:
+    """获取完整配置"""
     return {
-        "name": "上海市",
-        "code": city_code,
-        "province": "上海市"
+        "api_keys": API_KEYS,
+        "amap": AMAP_CONFIG,
+        "rag": RAG_CONFIG,
+        "defaults": DEFAULT_CONFIG,
+        "city_code_file": CITY_CODE_FILE,
+        "log": LOG_CONFIG,
+        "cache": CACHE_CONFIG
     }
+
+def validate_config() -> bool:
+    """验证配置完整性"""
+    required_keys = [
+        "DOUBAO_API_KEY",
+        "AMAP_WEATHER_API_KEY", 
+        "AMAP_TRAFFIC_API_KEY",
+        "AMAP_NAVIGATION_API_KEY",
+        "AMAP_POI_API_KEY"
+    ]
+    
+    for key in required_keys:
+        if not API_KEYS.get(key):
+            print(f"警告: 缺少API密钥 {key}")
+            return False
+    
+    return True
+
+if __name__ == "__main__":
+    if validate_config():
+        print("配置验证通过")
+    else:
+        print("配置验证失败，请检查API密钥")
