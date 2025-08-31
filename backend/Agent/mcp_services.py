@@ -211,7 +211,7 @@ class MCPServiceManager:
             services.append("weather")
         
         # 人流相关关键词
-        crowd_keywords = ["人多", "排队", "拥挤", "人流", "等待", "繁忙", "游客"]
+        crowd_keywords = ["多人", "排队", "拥挤", "人流", "等待", "繁忙", "游客"]
         if any(keyword in query for keyword in crowd_keywords):
             services.append("crowd")
         
@@ -248,6 +248,30 @@ class MCPServiceManager:
             result["traffic"] = self.traffic_service.get_traffic_info(attraction, origin)
         
         return result
+    
+    # 新增：从查询中提取地点的简易方法（与集成器保持一致的地点词表）
+    def _extract_location(self, query: str) -> str:
+        locations = [
+            '外滩', '东方明珠', '豫园', '城隍庙', '南京路', '新天地', '田子坊',
+            '朱家角', '七宝古镇', '上海博物馆', '上海科技馆', '迪士尼', '野生动物园',
+            '植物园', '中山公园', '人民广场', '陆家嘴', '静安寺', '徐家汇',
+            '虹桥', '浦东机场', '虹桥机场', '黄浦江', '苏州河', '世博园',
+            '上海大剧院', '音乐厅', '美术馆', '自然博物馆', '海洋馆'
+        ]
+        for loc in locations:
+            if loc in query:
+                return loc
+        return "上海市中心"
+    
+    # 新增：供集成器调用的统一接口
+    def get_integrated_info(self, query: str, attraction: Optional[str] = None, origin: str = "市中心") -> Dict[str, Any]:
+        """
+        统一的综合信息获取接口。
+        - 若未提供 attraction，则从 query 中尝试提取地点，默认“上海市中心”。
+        - 内部根据 query 自动挑选需要的服务。
+        """
+        target_attraction = attraction or self._extract_location(query)
+        return self.get_targeted_info(target_attraction, query, origin)
     
     def format_response(self, mcp_results: Dict[str, Any], query: str) -> str:
         """
