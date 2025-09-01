@@ -365,9 +365,8 @@ class Config:
     TRAFFIC_CACHE_DURATION = 180  # 3分钟
     CROWD_CACHE_DURATION = 300   # 5分钟
     
-    # ==================== 数据源配置 ====================
-    # 知识库配置
-    KNOWLEDGE_BASE_PATH = "./data"
+    # ==================== RAG知识库配置 ====================
+    KNOWLEDGE_BASE_PATH = os.path.join(os.path.dirname(__file__), "data")
     MAX_DOCUMENTS = 1000
     CHUNK_SIZE = 500
     MAX_CONTEXT_LENGTH = 1000
