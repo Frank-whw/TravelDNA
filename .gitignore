@@ -334,6 +334,25 @@ secrets.py
 .env*
 !.env.example
 
+# AI/ML模型文件
+*.pkl
+*.model
+*.weights
+*.checkpoint
+*.ckpt
+*.h5
+*.pb
+*.onnx
+*.tflite
+*.pt
+*.pth
+
+# 向量数据库文件
+*.faiss
+*.index
+chroma_db/
+vector_store/
+
 # 数据文件
 *.db
 *.sqlite
