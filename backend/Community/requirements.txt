@@ -1,7 +1,16 @@
-flask>=2.3.3
-flask-sqlalchemy>=3.1.1
-flask-cors>=4.0.0
-pymysql>=1.1.0
-sqlalchemy>=2.0.23
-python-dotenv>=1.0.0
-pymysql>=1.1.2
+# Community模块依赖包
+
+# 核心框架
+flask==2.3.3
+flask-sqlalchemy==3.1.1
+flask-cors==4.0.0
+
+# 数据库
+pymysql==1.1.2
+sqlalchemy==2.0.23
+
+# 环境变量管理
+python-dotenv==1.0.0
+
+# 数据处理（用于用户数据生成）
+faker==19.6.2
