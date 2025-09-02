@@ -34,13 +34,14 @@
 
 "use client"
 
-import { useState } from "react"
-import { Send, MapPin, MessageCircle, Sparkles, Clock, Star, Navigation } from "lucide-react"
+import { useState, useRef, useEffect } from "react"
+import { Send, MapPin, MessageCircle, Sparkles, Clock, Star, Navigation, Bot, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { agentApi, formatChatMessage, formatTravelPlan, type ChatMessage, type TravelPlan } from "@/lib/agentApi"
 
 /**
  * 聊天页面主组件 - AI旅游助手对话界面
@@ -65,21 +66,20 @@ export default function ChatPage() {
   
   /**
    * 消息历史状态 - 用户和AI的对话记录
-   * @type {Array<Object>} 消息对象数组，每个消息包含：
-   *   - id: 唯一标识符
-   *   - type: 消息类型（'user' | 'assistant'）
-   *   - content: 消息内容文本
-   *   - timestamp: 发送时间戳
+   * @type {Array<ChatMessage>} 消息对象数组，使用从agentApi导入的ChatMessage类型
    */
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      type: "assistant",
-      content:
-        "您好！我是知旅AI助手，可以为您解答任何旅行相关的问题。比如景点推荐、交通路线、美食攻略等。请问有什么可以帮助您的吗？",
-      timestamp: "刚刚",
-    },
-  ])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
 
   /**
    * 发送消息处理函数 - 处理用户消息发送和AI回复
@@ -88,41 +88,115 @@ export default function ChatPage() {
    * 1. 验证消息内容非空
    * 2. 创建用户消息对象并添加到消息列表
    * 3. 清空输入框
-   * 4. 模拟AI处理延迟
-   * 5. 生成AI回复消息
+   * 4. 调用真实的AI API
+   * 5. 处理AI回复和错误
    * 
    * 性能考虑：
    * - 使用函数式更新避免状态竞争
-   * - setTimeout模拟网络延迟，实际使用时替换为API调用
+   * - 真实API调用替换模拟延迟
    */
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     // 验证消息内容，空消息不发送
-    if (!message.trim()) return
+    if (!message.trim() || isLoading) return
 
-    // 创建新的用户消息对象
-    const newMessage = {
-      id: messages.length + 1,
-      type: "user",
-      content: message,
-      timestamp: "刚刚",
-    }
-
-    // 更新消息列表，添加用户消息
-    setMessages([...messages, newMessage])
-    // 清空输入框
+    const userMessage = formatChatMessage(message, 'user')
+    setMessages(prev => [...prev, userMessage])
     setMessage("")
+    setIsLoading(true)
+    setError(null)
 
-    // 模拟AI回复延迟（实际项目中替换为API调用）
-    setTimeout(() => {
-      const aiResponse = {
-        id: messages.length + 2,
-        type: "assistant",
-        content: "我正在为您查询相关信息，请稍等...",
-        timestamp: "刚刚",
+    try {
+      // 检查是否是旅游规划请求
+      const isPlanningRequest = message.includes('规划') || message.includes('计划') || 
+                               message.includes('路线') || message.includes('行程')
+      
+      if (isPlanningRequest) {
+        // 尝试解析目的地信息
+        const destinations = extractDestinations(message)
+        const origin = extractOrigin(message) || '上海'
+        
+        if (destinations.length > 0) {
+          // 创建旅游计划
+          const plan = await agentApi.createTravelPlan(origin, destinations)
+          const planMessage = formatChatMessage(
+            formatTravelPlan(plan),
+            'ai',
+            'plan'
+          )
+          setMessages(prev => [...prev, planMessage])
+        } else {
+          // 普通聊天
+          const response = await agentApi.chat(message)
+          const aiMessage = formatChatMessage(response.response, 'ai')
+          setMessages(prev => [...prev, aiMessage])
+          
+          // 如果有建议，添加建议消息
+          if (response.suggestions && response.suggestions.length > 0) {
+            const suggestionsMessage = formatChatMessage(
+              `💡 **相关建议**:\n${response.suggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
+              'ai',
+              'suggestions'
+            )
+            setMessages(prev => [...prev, suggestionsMessage])
+          }
+        }
+      } else {
+        // 普通聊天
+        const response = await agentApi.chat(message)
+        const aiMessage = formatChatMessage(response.response, 'ai')
+        setMessages(prev => [...prev, aiMessage])
+        
+        // 如果有建议，添加建议消息
+        if (response.suggestions && response.suggestions.length > 0) {
+          const suggestionsMessage = formatChatMessage(
+            `💡 **相关建议**:\n${response.suggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
+            'ai',
+            'suggestions'
+          )
+          setMessages(prev => [...prev, suggestionsMessage])
+        }
       }
-      // 使用函数式更新确保状态正确
-      setMessages((prev) => [...prev, aiResponse])
-    }, 1000)
+    } catch (err) {
+      console.error('Chat error:', err)
+      const errorMessage = err instanceof Error ? err.message : '发生未知错误'
+      setError(errorMessage)
+      
+      const errorResponse = formatChatMessage(
+        `抱歉，我遇到了一些问题：${errorMessage}。请稍后再试，或者检查网络连接。`,
+        'ai'
+      )
+      setMessages(prev => [...prev, errorResponse])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // 辅助函数：从用户输入中提取目的地
+  const extractDestinations = (input: string): string[] => {
+    const destinations: string[] = []
+    const commonDestinations = ['外滩', '东方明珠', '豫园', '南京路步行街', '人民广场', '田子坊', '新天地', '朱家角']
+    
+    commonDestinations.forEach(dest => {
+      if (input.includes(dest)) {
+        destinations.push(dest)
+      }
+    })
+    
+    return destinations
+  }
+
+  // 辅助函数：从用户输入中提取出发地
+  const extractOrigin = (input: string): string | null => {
+    const originKeywords = ['从', '出发', '起点']
+    const commonOrigins = ['上海', '北京', '广州', '深圳', '杭州', '南京']
+    
+    for (const origin of commonOrigins) {
+      if (input.includes(origin)) {
+        return origin
+      }
+    }
+    
+    return null
   }
 
   /**
@@ -271,43 +345,94 @@ export default function ChatPage() {
 
               {/* Messages - 消息展示区域 */}
               <CardContent className="flex-1 overflow-y-auto p-4">
-                <div className="space-y-4">
-                  {messages.map((msg) => (
-                    <div key={msg.id} className={`flex gap-3 ${msg.type === "user" ? "justify-end" : "justify-start"}`}>
-                      {/* AI头像 - 仅在助手消息时显示 */}
-                      {msg.type === "assistant" && (
-                        <Avatar className="w-8 h-8">
-                          <AvatarImage src="/placeholder.svg?height=32&width=32" />
-                          <AvatarFallback className="bg-gradient-to-r from-blue-500 to-green-500 text-white text-xs">
-                            AI
-                          </AvatarFallback>
-                        </Avatar>
-                      )}
-
-                      {/* 消息气泡 - 根据消息类型应用不同样式 */}
-                      <div
-                        className={`max-w-[70%] rounded-lg p-3 ${
-                          msg.type === "user" ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-900"
-                        }`}
-                      >
-                        {/* 消息内容 */}
-                        <p className="text-sm">{msg.content}</p>
-                        {/* 时间戳 */}
-                        <p className={`text-xs mt-1 ${msg.type === "user" ? "text-blue-100" : "text-gray-500"}`}>
-                          {msg.timestamp}
-                        </p>
-                      </div>
-
-                      {/* 用户头像 - 仅在用户消息时显示 */}
-                      {msg.type === "user" && (
-                        <Avatar className="w-8 h-8">
-                          <AvatarImage src="/placeholder.svg?height=32&width=32" />
-                          <AvatarFallback className="bg-gray-500 text-white text-xs">我</AvatarFallback>
-                        </Avatar>
-                      )}
+                {error && (
+                  <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-red-600 text-sm">⚠️ {error}</p>
+                  </div>
+                )}
+                
+                {messages.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-gray-500">
+                    <div className="text-center">
+                      <MessageCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                      <p>开始与AI助手对话吧！</p>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {messages.map((msg) => (
+                      <div key={msg.id} className={`flex gap-3 ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+                        <div className={`flex items-start space-x-3 max-w-[80%] ${
+                          msg.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''
+                        }`}>
+                          {/* 头像 */}
+                          <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                            msg.sender === 'user' 
+                              ? 'bg-blue-500 text-white' 
+                              : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white'
+                          }`}>
+                            {msg.sender === 'user' ? <User size={16} /> : <Bot size={16} />}
+                          </div>
+                          
+                          {/* 消息内容 */}
+                          <div
+                            className={`p-4 rounded-lg ${
+                              msg.sender === 'user'
+                                ? 'bg-blue-500 text-white'
+                                : msg.type === 'plan'
+                                ? 'bg-gradient-to-r from-green-50 to-blue-50 text-gray-800 border border-green-200'
+                                : msg.type === 'suggestions'
+                                ? 'bg-gradient-to-r from-yellow-50 to-orange-50 text-gray-800 border border-yellow-200'
+                                : 'bg-gray-100 text-gray-800'
+                            }`}
+                          >
+                            <div className="whitespace-pre-wrap">
+                              {msg.content.split('\n').map((line, index) => {
+                                // 处理Markdown样式的粗体文本
+                                if (line.includes('**')) {
+                                  const parts = line.split('**')
+                                  return (
+                                    <p key={index} className="mb-1">
+                                      {parts.map((part, partIndex) => 
+                                        partIndex % 2 === 1 ? 
+                                          <strong key={partIndex}>{part}</strong> : 
+                                          part
+                                      )}
+                                    </p>
+                                  )
+                                }
+                                return <p key={index} className="mb-1">{line}</p>
+                              })}
+                            </div>
+                            <p className="text-xs mt-2 opacity-70">
+                              {new Date(msg.timestamp).toLocaleTimeString()}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    {/* 加载指示器 */}
+                    {isLoading && (
+                      <div className="flex justify-start">
+                        <div className="flex items-start space-x-3 max-w-[80%]">
+                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white flex items-center justify-center">
+                            <Bot size={16} />
+                          </div>
+                          <div className="bg-gray-100 text-gray-800 p-4 rounded-lg">
+                            <div className="flex items-center space-x-2">
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-500"></div>
+                              <span className="text-sm">AI正在思考中...</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* 滚动到底部的引用 */}
+                    <div ref={messagesEndRef} />
+                  </div>
+                )}
               </CardContent>
 
               {/* Input Area - 消息输入区域 */}
@@ -322,7 +447,7 @@ export default function ChatPage() {
                     className="flex-1"
                   />
                   {/* 发送按钮 - 空消息时禁用 */}
-                  <Button onClick={handleSendMessage} disabled={!message.trim()}>
+                  <Button onClick={handleSendMessage} disabled={!message.trim() || isLoading}>
                     <Send className="w-4 h-4" />
                   </Button>
                 </div>
