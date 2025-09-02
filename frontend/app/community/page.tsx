@@ -214,6 +214,7 @@ export default function Community() {
       };
       
       initData();
+      //console.log("OKOK\n");
     }, []);
   
   
@@ -251,7 +252,7 @@ export default function Community() {
     try {
       setIsLoading(prev => ({ ...prev, teams: true }));
       const response = await communityApi.getUserTeams(currentUserId);
-      if (response.status === 'success' && response.data) {
+      if (response.status === 'success' && response) {
         setTeams([...response.data.captainTeams, ...response.data.memberTeams]);
         setCaptainTeams(response.data.captainTeams);
         setMemberTeams(response.data.memberTeams);
@@ -269,6 +270,7 @@ export default function Community() {
     try {
       setIsLoading(prev => ({ ...prev, matches: true }));
       const response = await communityApi.getUserMatches(currentUserId);
+      //console.log(response.data);
       if (response.status === 'success' && response.data) {
         setMatchResults(response.data);
         if (response.data.length > 0 && !selectedUser) {
@@ -351,167 +353,52 @@ export default function Community() {
     });
   };
   
-  // 开始匹配功能
-  const startMatching = () => {
-    // 验证用户资料是否完整
-    if (!userProfile.mbti || !userProfile.travelDestination || 
-        !userProfile.schedule || !userProfile.budget || 
-        userProfile.hobbies.length === 0 || !userProfile.gender || !userProfile.age) {
-      toast.error("请先完善您的个人资料！");
-      return;
-    }
-    
-    setIsMatching(true);
-    
-    // 模拟匹配过程延迟
-    setTimeout(() => {
-      const results = generateMockMatches();
-      setMatchResults(results);
-      setShowMatchResults(true);
-      setIsMatching(false);
-      toast.success(`找到${results.length}个潜在旅行搭子！`);
-    }, 1500);
-  };
-  
-  // 选择匹配用户
-  const selectMatchUser = (user: MatchUser) => {
-    setSelectedUser(user);
-  };
-  
   // 创建新队伍
-  const createTeam = () => {
+  const createTeam = async () => {
     if (!newTeamName.trim()) {
       toast.error("请输入队伍名称");
       return;
     }
     
-    const newTeam: Team = {
-      id: Date.now(),
-      name: newTeamName,
-      members: [
-        {
-          id: 999,
-          name: "我自己",
-          avatar: `https://space.coze.cn/api/coze_space/gen_image?image_size=square&prompt=User%20avatar%2C%20person%20portrait%2C%20cartoon%20style&sign=a9b44dd75e1d6cd26a8cf0935243421c`,
-          age: userProfile.age,
-          gender: userProfile.gender,
-          mbti: userProfile.mbti,
-          hobbies: userProfile.hobbies,
-          travelDestination: userProfile.travelDestination,
-          schedule: userProfile.schedule,
-          budget: userProfile.budget,
-          bio: "队伍创建者"
-        }
-      ],
-      captainId: 999 // 当前用户ID
-    };
+
+    await communityApi.createTeam(newTeamName,userProfile.id);
     
-    setTeams(prev => [...prev, newTeam]);
+    loadTeams();
     setNewTeamName("");
     toast.success(`成功创建队伍: ${newTeamName}`);
   };
   
   // 删除队伍
-  const deleteTeam = (teamId: number) => {
-    // 验证是否为队长
-    const team = teams.find(t => t.id === teamId);
-    if (!team || team.captainId !== 999) { // 999为当前用户ID
-      toast.error("只有队长可以删除队伍");
-      return;
-    }
-    
-    setTeams(prev => prev.filter(team => team.id !== teamId));
+  const deleteTeam = async (teamId: number) => {
+    await communityApi.deleteTeam(teamId,userProfile.id);
+
+    loadTeams();//删除后重新加载队伍
     toast.success("队伍已删除");
   };
   
   // 邀请用户加入队伍
-  const inviteToTeam = (teamId: number) => {
+  const inviteToTeam = async (teamId: number) => {
     if (!selectedUser) return;
     
-    setTeams(prev => 
-      prev.map(team => {
-        if (team.id === teamId) {
-          // 检查用户是否已在队伍中
-          const isAlreadyMember = team.members.some(member => member.id === selectedUser.id);
-          if (isAlreadyMember) {
-            toast.warning(`${selectedUser.name}已在队伍中`);
-            return team;
-          }
-          
-          // 添加用户到队伍
-          return {
-            ...team,
-            members: [...team.members, selectedUser]
-          };
-        }
-        return team;
-      })
-    );
+    await communityApi.addTeamMember(teamId,selectedUser.id);
     
+    loadMatches();
+    loadTeams();
     toast.success(`已邀请${selectedUser.name}加入队伍`);
   };
   
   // 队员离开队伍
-  const leaveTeam = (teamId: number) => {
-    setTeams(prev => 
-      prev.map(team => {
-        if (team.id === teamId) {
-          // 过滤掉当前用户(999)
-          const updatedMembers = team.members.filter(member => member.id !== 999);
-          
-          // 如果队伍为空，删除该队伍
-          if (updatedMembers.length === 0) {
-            return null;
-          }
-          
-          // 如果队长离开了，需要重新分配队长(取第一个成员)
-          if (team.captainId === 999 && updatedMembers.length > 0) {
-            return {
-              ...team,
-              members: updatedMembers,
-              captainId: updatedMembers[0].id
-            };
-          }
-          
-          return {
-            ...team,
-            members: updatedMembers
-          };
-        }
-        return team;
-      }).filter(team => team !== null) as Team[]
-    );
+  const leaveTeam = async (teamId: number) => {
     
+    await communityApi.removeTeamMember(teamId,userProfile.id,userProfile.id);
+    loadTeams();
     toast.success("成功离开队伍");
   };
   
   // 队长踢出成员
-  const removeMember = (teamId: number, memberId: number) => {
-    // 验证是否为队长
-    const team = teams.find(t => t.id === teamId);
-    if (!team || team.captainId !== 999) {
-      toast.error("只有队长可以踢出成员");
-      return;
-    }
-    
-    // 不能踢出自己
-    if (memberId === team.captainId) {
-      toast.error("队长不能踢出自己");
-      return;
-    }
-    
-    setTeams(prev => 
-      prev.map(team => {
-        if (team.id === teamId) {
-          return {
-            ...team,
-            members: team.members.filter(member => member.id !== memberId)
-          };
-        }
-        return team;
-      })
-    );
-    
+  const removeMember = async (teamId: number, memberId: number) => {
+    await communityApi.removeTeamMember(teamId,memberId,userProfile.id);
+    loadTeams();
     toast.success("已将成员踢出队伍");
   };
   

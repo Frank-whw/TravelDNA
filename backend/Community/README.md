@@ -9,7 +9,9 @@ Community/
 │ &ensp;&ensp;  └── utils.py              # 工具函数（匹配算法等）
 ├── .env                      # 环境变量
 └── run.py                    # 启动入口
-## 数据库
-User表，Team表，Message表，Hobbies表
-User与Team是多对多的关系
-Team与Message是一对多的关系
+## 运行
+在前端app/community/communityApi.ts中配置url  
+然后运行，run.py
+```shell
+python run.py
+```

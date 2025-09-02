@@ -122,6 +122,7 @@ def get_teams():
     # 我加入的队伍
     user = User.query.get(user_id)
     member_teams = user.joined_teams.filter(Team.captain_id != user_id).all()
+    #print([team.to_dict() for team in captain_teams])
     
     return jsonify({
         "status": "success",
@@ -135,7 +136,10 @@ def create_team():
     
     if not data.get('name') or not data.get('captainId'):
         return jsonify({"status": "error", "message": "队伍名称和队长ID不能为空"}), 400
-    
+    captain_teams = Team.query.with_entities(Team.name).filter_by(captain_id=data['captainId']).all()
+    for team in captain_teams:
+        if team == data['name']:
+            return jsonify({"status": "error", "message": "已经创建过同名队伍"}), 400
     try:
         # 创建队伍
         team = Team(

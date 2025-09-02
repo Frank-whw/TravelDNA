@@ -60,16 +60,6 @@ export interface Dictionaries {
   budgets: string[];
 }
 
-// 新增：检查队伍名是否已存在
-export const checkTeamNameExists = async (captainId: number, teamName: string) => {
-  const response = await fetch(
-    `${API_BASE_URL}/teams/check-name?captain_id=${captainId}&name=${encodeURIComponent(teamName)}`
-  );
-  
-  const data: ApiResponse<{ exists: boolean }> = await response.json();
-  return data;
-};
-
 // API服务类
 export const communityApi = {
   // 初始化基础数据
@@ -170,26 +160,26 @@ export const communityApi = {
   // 获取用户的队伍
   getUserTeams: async (userId: number) => {
     const response = await fetch(`${API_BASE_URL}/teams?user_id=${userId}`);
-    const data: ApiResponse<{
+    const rawData = await response.text();
+    
+    const data: {
+      status: string;
       captainTeams: Team[];
       memberTeams: Team[];
-    }> = await response.json();
-    return data;
+    } = JSON.parse(rawData);
+    
+    return {
+      status: data.status,
+      data: {
+        captainTeams: data.captainTeams || [],
+        memberTeams: data.memberTeams || []
+      }
+    };
   },
   
   // 创建队伍 - 增加防重复检查逻辑
   createTeam: async (name: string, captainId: number) => {
-    // 前端先检查队伍名是否已存在
-    const checkResponse = await checkTeamNameExists(captainId, name);
-    if (checkResponse.status === 'success' && checkResponse.data?.exists) {
-      return {
-        status: 'error',
-        message: '您已创建过同名队伍，请更换名称',
-        errorCode: 'DUPLICATE_TEAM_NAME'
-      } as ApiResponse<Team>;
-    }
     
-    // 后端再次验证并创建队伍
     const response = await fetch(`${API_BASE_URL}/teams`, {
       method: 'POST',
       headers: {
