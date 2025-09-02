@@ -82,7 +82,7 @@ export default function HomePage() {
               <a href="chat" className="text-gray-600 hover:text-blue-600 transition-colors">
                 AI问答
               </a>
-              <a href="#" className="text-gray-600 hover:text-blue-600 transition-colors">
+              <a href="community" className="text-gray-600 hover:text-blue-600 transition-colors">
                 社区
               </a>
               <a href="#" className="text-gray-600 hover:text-blue-600 transition-colors">
