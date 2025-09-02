@@ -242,7 +242,7 @@ def remove_team_member(team_id, user_id):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # 消息相关接口
-@api_bp.route('/teams/<int:team_id>/messages', methods=['GET'])
+'''@api_bp.route('/teams/<int:team_id>/messages', methods=['GET'])
 def get_team_messages(team_id):
     team = Team.query.get(team_id)
     if not team:
@@ -253,6 +253,23 @@ def get_team_messages(team_id):
         "status": "success",
         "data": [msg.to_dict() for msg in messages]
     })
+    '''
+# 新增/修改：获取队伍消息（支持按lastMsgId筛选新消息）
+@api_bp.route('/teams/<int:team_id>/messages', methods=['GET'])
+def get_team_messages(team_id):
+    # 1. 获取前端传递的lastMsgId（默认0，即全量加载）
+    last_msg_id = request.args.get('lastMsgId', '0')
+    last_msg_id = int(last_msg_id) if last_msg_id.isdigit() else 0
+    
+    # 2. 查询该队伍的消息（只取比last_msg_id大的消息，按时间升序）
+    messages = Message.query.filter(
+        Message.team_id == team_id,
+        Message.id> last_msg_id  # 增量筛选：只返回新消息
+    ).order_by(Message.send_time).all()
+    
+    
+    return jsonify({"status": "success", "data": [msg.to_dict() for msg in messages]}), 200
+
 
 @api_bp.route('/teams/<int:team_id>/messages', methods=['POST'])
 def send_team_message(team_id):

@@ -7,7 +7,6 @@ interface ApiResponse<T> {
   message?: string;
   data?: T;
   count?: number;
-  // 新增错误代码，便于前端处理特定错误
   errorCode?: string;
 }
 
@@ -30,6 +29,11 @@ export interface UserProfile {
 export interface MatchUser extends UserProfile {
   matchingScore: number;
   isVerified?: boolean;
+}
+
+// 后端返回匹配结果
+interface MatchUserBack extends MatchUser{
+  user:any;
 }
 
 // 队伍类型
@@ -120,9 +124,10 @@ export const communityApi = {
   // 获取用户匹配结果
   getUserMatches: async (userId: number) => {
     const response = await fetch(`${API_BASE_URL}/users/${userId}/matches`);
-    const data: ApiResponse<{user: MatchUser}[]> = await response.json();
+    const data: ApiResponse<MatchUserBack[]> = await response.json();
     
-    // 转换数据格式以适应前端需求
+    //console.log(data);
+    
     if (data.status === 'success' && data.data) {
       return {
         ...data,
@@ -259,10 +264,16 @@ export const communityApi = {
   },
   
   // 获取队伍消息
-  getTeamMessages: async (teamId: number) => {
+  /*getTeamMessages: async (teamId: number) => {
     const response = await fetch(`${API_BASE_URL}/teams/${teamId}/messages`);
     const data: ApiResponse<Message[]> = await response.json();
     return data;
+  },*/
+  getTeamMessages : async (teamId: number,lastMsgId:number) => {
+    const response = await fetch(`${API_BASE_URL}/teams/${teamId}/messages?lastMsgId=${lastMsgId}`);
+    const data : ApiResponse<Message[]> = await response.json();
+    //console.log(data);
+    return data
   },
   
   // 发送队伍消息 - 增加空消息检查

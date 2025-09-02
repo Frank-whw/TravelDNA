@@ -76,53 +76,6 @@ const budgets = [
   "经济型", "舒适型", "轻奢型", "豪华型"
 ];
 
-// 生成模拟匹配用户数据
-const generateMockMatches = (): MatchUser[] => {
-  return Array.from({ length: 8 }, (_, i) => ({
-    id: i + 1,
-    name: `旅行者${i + 1}`,
-    avatar: `https://space.coze.cn/api/coze_space/gen_image?image_size=square&prompt=Traveler%20avatar%2C%20person%20portrait%2C%20cartoon%20style&sign=c78c870568801b5b3a239395ecc9a66d`,
-    age: Math.floor(Math.random() * 30) + 20,
-    gender: Math.random() > 0.5 ? "男" : "女",
-    mbti: mbtiTypes[Math.floor(Math.random() * mbtiTypes.length)],
-    hobbies: Array.from({ length: Math.floor(Math.random() * 3) + 2 }, () => 
-      hobbiesList[Math.floor(Math.random() * hobbiesList.length)]
-    ),
-    travelDestination: destinations[Math.floor(Math.random() * destinations.length)],
-    schedule: schedules[Math.floor(Math.random() * schedules.length)],
-    budget: budgets[Math.floor(Math.random() * budgets.length)],
-    matchingScore: Math.floor(Math.random() * 30) + 70,
-    isVerified: Math.random() > 0.3,
-    bio: "热爱旅行，希望找到志同道合的旅伴一起探索世界的美好。喜欢体验当地文化和美食，期待与你同行！"
-  }));
-};
-
-// 生成初始队伍数据
-const generateInitialTeams = (): Team[] => {
-  return [
-    {
-      id: 1,
-      name: "山水探索队",
-      members: [
-        {
-          id: 999,
-          name: "我自己",
-          avatar: `https://space.coze.cn/api/coze_space/gen_image?image_size=square&prompt=User%20avatar%2C%20person%20portrait%2C%20cartoon%20style&sign=a9b44dd75e1d6cd26a8cf0935243421c`,
-          age: 28,
-          gender: "男",
-          mbti: "ENFP",
-          hobbies: ["摄影", "徒步", "自然风光"],
-          travelDestination: "张家界",
-          schedule: "弹性作息",
-          budget: "舒适型",
-          bio: "旅行爱好者，喜欢探索自然景观和人文历史。"
-        }
-      ],
-      captainId: 999 // 当前用户ID
-    }
-  ];
-};
-
 export default function Community() {
     // 状态管理
     const [userProfile, setUserProfile] = useState<UserProfile>({
@@ -167,7 +120,10 @@ export default function Community() {
     const [currentChatTeamId, setCurrentChatTeamId] = useState<number | null>(null);
     const [chatMessages, setChatMessages] = useState<Message[]>([]);
     const [newMessage, setNewMessage] = useState("");
-    const messagesEndRef = useRef<HTMLDivElement>(null);
+    // 新增：聊天轮询相关状态
+    const [pollingTimer, setPollingTimer] = useState<NodeJS.Timeout | null>(null); // 轮询定时器
+    const [lastMsgId, setLastMsgId] = useState<number>(0); 
+    const lastMsgIdRef = useRef(lastMsgId); // 创建ref存储最新ID
     
     // 加载状态
     const [isLoading, setIsLoading] = useState({
@@ -177,6 +133,10 @@ export default function Community() {
       messages: false,
       init: false
     });
+
+    useEffect(() => {
+      lastMsgIdRef.current = lastMsgId;
+    }, [lastMsgId]);
     
     // 初始化数据
     useEffect(() => {
@@ -219,32 +179,29 @@ export default function Community() {
   
   
   // 打开群聊模态框
-  const openChatModal = (teamId: number) => {
+  const openChatModal = async (teamId: number) => {
     setCurrentChatTeamId(teamId);
     setIsChatOpen(true);
     
-    // 模拟聊天历史记录
-    const team = teams.find(t => t.id === teamId);
-    if (team) {
-      setChatMessages([
-        {
-          id: 1,
-          teamId: 1,
-          senderId: team.captainId,
-          senderName: team.members.find(m => m.id === team.captainId)?.name || "队长",
-          content: `欢迎来到${team.name}的群聊！`,
-          timestamp: "10:00"
-        },
-        {
-          id: 2,
-          teamId: 2,
-          senderId: 999,
-          senderName: "我自己",
-          content: "大家好！",
-          timestamp: "10:05"
-        }
-      ]);
+    //首次打开
+    const Message = await communityApi.getTeamMessages(teamId,lastMsgId);
+    if(Message.status==='success' && Message.data){
+      setChatMessages(Message.data);
+      if(Message.data.length>0)setLastMsgId(Message.data[Message.data.length-1].id);
     }
+
+    //启动轮询
+    const timer = setInterval(async ()=>{
+      const mes = await communityApi.getTeamMessages(teamId,lastMsgIdRef.current);
+      if(mes.status=='success' && mes.data){
+        //console.log(mes.data.length);
+        if(mes.data.length>0){
+          setLastMsgId(mes.data[mes.data.length-1].id);
+          setChatMessages(prev => [...prev, ...mes.data]);
+        }
+      }
+    },500);
+    setPollingTimer(timer);
   };
 
   // 加载队伍信息
@@ -290,24 +247,34 @@ export default function Community() {
     setIsChatOpen(false);
     setCurrentChatTeamId(null);
     setNewMessage("");
+    setLastMsgId(0);
+    if(pollingTimer){
+      clearInterval(pollingTimer);
+      setPollingTimer(null);
+    }
   };
   
   // 发送消息
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!newMessage.trim() || !currentChatTeamId) return;
     
-    const newMsg = {
-      id: Date.now().toString(),
-      senderId: 999,
-      senderName: "我自己",
+    /*const newMsg = {
+      id: 111,//这里的id无所谓
+      teamId:currentChatTeamId,
+      senderId: userProfile.id,
+      senderName: userProfile.name,
       content: newMessage,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
+    };*/
+
+    await communityApi.sendTeamMessage(currentChatTeamId,userProfile.id,newMessage);
     
-    setChatMessages(prev => [...prev, newMsg]);
+    
+    //setChatMessages(prev => [...prev, newMsg]);
+
     setNewMessage("");
     
-    // 模拟对方回复
+    /*// 模拟对方回复
     const team = teams.find(t => t.id === currentChatTeamId);
     if (team) {
       const otherMembers = team.members.filter(m => m.id !== 999);
@@ -325,7 +292,7 @@ export default function Community() {
           setChatMessages(prev => [...prev, replyMsg]);
         }, 1500);
       }
-    }
+    }*/
   };
   
   // 是否显示匹配结果状态
@@ -424,19 +391,6 @@ export default function Community() {
       setIsMatching(false);
     }, 1000);
 
-    
-    /*// 模拟匹配过程
-    setTimeout(() => {
-      const results = generateMockMatches();
-      setMatchResults(results);
-      setShowMatchResults(true);
-      setIsMatching(false);
-      
-      // 自动选择第一个匹配结果
-      if (results.length > 0) {
-        setSelectedUser(results[0]);
-      }
-    }, 2000);*/
   };
   
   return (
@@ -979,7 +933,7 @@ export default function Community() {
                                         </div>
                                       </div>
                                       {/* 自己可以离开队伍 */}
-                                      {member.id === 999 && (
+                                      {member.id === userProfile.id && (
                                         <Button 
                                           variant="ghost" 
                                           size="icon" 
@@ -1029,26 +983,26 @@ export default function Community() {
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
               {chatMessages.map(msg => (
-                <div key={msg.id} className={`flex gap-2 ${msg.senderId === 999 ? 'justify-end' : 'justify-start'}`}>
-                  {msg.senderId !== 999 && (
+                <div key={msg.id} className={`flex gap-2 ${msg.senderId === userProfile.id ? 'justify-end' : 'justify-start'}`}>
+                  {msg.senderId !== userProfile.id && (
                     <Avatar className="w-8 h-8 mt-1">
                       <AvatarFallback className="bg-gradient-to-r from-blue-500 to-indigo-500">
                         {msg.senderName.charAt(0)}
                       </AvatarFallback>
                     </Avatar>
                   )}
-                  <div className={`max-w-[70%] ${msg.senderId === 999 ? 'items-end' : 'items-start'} flex flex-col`}>
-                    {msg.senderId !== 999 && (
+                  <div className={`max-w-[70%] ${msg.senderId === userProfile.id ? 'items-end' : 'items-start'} flex flex-col`}>
+                    {msg.senderId !== userProfile.id && (
                       <span className="text-xs text-gray-500 mb-1">{msg.senderName}</span>
                     )}
                     <div className={`rounded-lg p-3 ${
-                      msg.senderId === 999 
+                      msg.senderId === userProfile.id 
                         ? 'bg-blue-500 text-white rounded-br-none' 
                         : 'bg-gray-100 text-gray-900 rounded-bl-none'
                     }`}>
                       <p className="text-sm">{msg.content}</p>
                     </div>
-                    <span className={`text-xs mt-1 ${msg.senderId === 999 ? 'text-blue-200' : 'text-gray-400'}`}>
+                    <span className={`text-xs mt-1 ${msg.senderId === userProfile.id ? 'text-blue-200' : 'text-gray-400'}`}>
                       {msg.timestamp}
                     </span>
                   </div>

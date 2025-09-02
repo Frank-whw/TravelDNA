@@ -10,6 +10,7 @@ Community/
 ├── .env                      # 环境变量
 └── run.py                    # 启动入口
 ## 运行
+数据库创建Community数据库，然后可以运行random_user.py进行初始化
 在前端app/community/communityApi.ts中配置url  
 然后运行，run.py
 ```shell
