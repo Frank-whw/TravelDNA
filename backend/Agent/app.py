@@ -85,8 +85,8 @@ def chat():
             response = "根据最新天气预报，今天是个适合出行的好天气！建议您选择户外景点游览。如需详细天气信息，我可以为您查询具体地点的天气状况。"
             suggestions = ["外滩观光", "豫园游览", "人民广场散步", "查询具体天气"]
         elif '交通' in user_message:
-            response = "上海的地铁系统非常发达，建议使用地铁出行。我可以为您规划最优交通路线，避开拥堵时段。"
-            suggestions = ["查看地铁线路图", "规划交通路线", "实时交通状况", "购买交通卡"]
+            response = "我可以为您制定行程、推荐景点和查询天气等信息。若需规划出行路线，我也可以结合景点开放时间与人流情况为您安排合理行程。"
+            suggestions = ["制定旅游计划", "查询景点信息", "天气查询"]
         elif '美食' in user_message:
             response = "上海有很多特色美食！我推荐尝试小笼包、生煎包、本帮菜等。可以为您推荐附近的特色餐厅。"
             suggestions = ["南翔小笼包", "大壶春生煎", "老正兴菜馆", "附近美食推荐"]
@@ -97,8 +97,8 @@ def chat():
             response = "我可以根据您的兴趣推荐合适的景点！上海有外滩、东方明珠、豫园、南京路等著名景点。您偏好哪种类型的景点呢？"
             suggestions = ["历史文化景点", "现代建筑景观", "购物娱乐区域", "自然风光"]
         else:
-            response = f"我理解您想了解\"{user_message}\"。作为您的智能旅游助手，我可以为您提供：\n\n🗺️ 个性化旅游规划\n🚇 交通路线优化\n🌤️ 实时天气信息\n🍜 美食景点推荐\n📊 人流量预测\n\n请告诉我您的具体需求，我会为您提供最专业的建议！"
-            suggestions = ["制定旅游计划", "查询景点信息", "获取交通指南", "天气查询"]
+            response = f"我理解您想了解\"{user_message}\"。作为您的智能旅游助手，我可以为您提供：\n\n🗺️ 个性化旅游规划\n🌤️ 实时天气信息\n🍜 美食景点推荐\n📊 人流量预测\n\n请告诉我您的具体需求，我会为您提供最专业的建议！"
+            suggestions = ["制定旅游计划", "查询景点信息", "天气查询"]
         
         ai_response = {
             'message': response,
@@ -177,14 +177,14 @@ def create_travel_plan():
                     'distance': segment.distance,
                     'duration': segment.duration,
                     'transport_mode': segment.transport_mode,
-                    'traffic_condition': segment.traffic_condition.value if hasattr(segment.traffic_condition, 'value') else segment.traffic_condition,
+                    # 'traffic_condition': segment.traffic_condition.value if hasattr(segment.traffic_condition, 'value') else segment.traffic_condition,
                     'cost': segment.cost
                 } for segment in plan.route_segments],
                 'total_distance': plan.total_distance,
                 'total_duration': plan.total_duration,
                 'total_cost': plan.total_cost,
                 'weather_compatibility': plan.weather_compatibility,
-                'traffic_score': plan.traffic_score,
+                # 'traffic_score': plan.traffic_score,
                 'crowd_score': plan.crowd_score,
                 'overall_score': plan.overall_score,
                 'recommendations': plan.recommendations,
@@ -215,13 +215,13 @@ def create_travel_plan():
                 'total_duration': len(destinations) * 120,
                 'total_cost': len(destinations) * 25.0,
                 'weather_compatibility': 75.0,
-                'traffic_score': 80.0,
+                # 'traffic_score': 80.0,
                 'crowd_score': 70.0,
                 'overall_score': 85.0,
                 'recommendations': [
                     '建议上午出发，避开人流高峰',
                     '携带防晒用品，今日阳光较强',
-                    '推荐使用地铁出行，避免交通拥堵'
+                    '尽量选择相邻景点，减少路程时间'
                 ],
                 'adjustments': [],
                 'created_at': datetime.now().isoformat()
@@ -534,50 +534,11 @@ def get_weather_info():
 @app.route(f'{API_PREFIX}/travel/traffic', methods=['GET'])
 def get_traffic_info():
     """获取交通信息"""
-    try:
-        from_location = request.args.get('from', '上海')
-        to_location = request.args.get('to', '外滩')
-        
-        # 模拟交通数据
-        traffic_data = {
-            'route': f'{from_location} -> {to_location}',
-            'options': [
-                {
-                    'mode': '地铁',
-                    'duration': 35,
-                    'cost': 4,
-                    'condition': '畅通',
-                    'recommendation': '推荐选择，快速便捷'
-                },
-                {
-                    'mode': '公交',
-                    'duration': 45,
-                    'cost': 2,
-                    'condition': '正常',
-                    'recommendation': '经济实惠的选择'
-                },
-                {
-                    'mode': '出租车',
-                    'duration': 25,
-                    'cost': 35,
-                    'condition': '轻微拥堵',
-                    'recommendation': '舒适但费用较高'
-                }
-            ],
-            'best_option': '地铁',
-            'traffic_advice': '建议使用地铁出行，避开早晚高峰时段'
-        }
-        
-        return jsonify({
-            'status': 'success',
-            'data': traffic_data
-        })
-    
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+    return jsonify({
+        'status': 'error',
+        'message': '请求的资源不存在',
+        'errorCode': 'NOT_FOUND'
+    }), 404
 
 @app.route(f'{API_PREFIX}/travel/crowd', methods=['GET'])
 def get_crowd_info():

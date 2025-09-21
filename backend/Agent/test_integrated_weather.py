@@ -88,7 +88,9 @@ def test_route_planning_with_weather():
             if stop['weather']['recommendation']:
                 print(f"  💡 天气建议: {stop['weather']['recommendation']}")
             print(f"  👥 人流: {stop['crowd_level']}")
-            print(f"  🚗 交通: {stop['traffic']}")
+            # 避免对可选字段的强依赖（不同数据源可能无 traffic 字段）
+            if 'traffic' in stop and stop['traffic']:
+                print(f"  🚗 交通: {stop['traffic']}")
             print(f"  ⏱️ 游览时长: {stop['duration']}")
             print()
         

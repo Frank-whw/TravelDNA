@@ -14,7 +14,7 @@ from datetime import datetime
 # 添加模块路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from travel_agent import TravelAgentService, TravelPreference, WeatherCondition, TrafficCondition, CrowdLevel
+from travel_agent import TravelAgentService, TravelPreference, WeatherCondition, CrowdLevel
 from config import Config
 
 def test_basic_travel_planning():
@@ -37,7 +37,7 @@ def test_basic_travel_planning():
     print(f"\n⏱️ 规划用时: {end_time - start_time:.2f}秒")
     print(f"📊 方案得分: {travel_plan.overall_score:.1f}/100")
     print(f"🌤️ 天气适宜度: {travel_plan.weather_compatibility:.1f}/100")
-    print(f"🚦 交通便利度: {travel_plan.traffic_score:.1f}/100")
+    # print(f"🚦 交通便利度: {travel_plan.traffic_score:.1f}/100")
     print(f"👥 人流舒适度: {travel_plan.crowd_score:.1f}/100")
     
     # 显示智能建议
@@ -85,9 +85,9 @@ def test_weather_condition_handling():
     print(f"  得分: {plan_tolerant.overall_score:.1f}, 天气: {plan_tolerant.weather_compatibility:.1f}")
 
 def test_traffic_optimization():
-    """测试交通优化"""
-    print("\n🚦 交通优化测试")
-    print("=" * 50)
+    """测试交通优化（占位保留）"""
+    # 静默跳过占位测试
+    return
     
     travel_agent = TravelAgentService()
     
@@ -153,7 +153,7 @@ def test_user_preference_adjustment():
     # 模拟用户回答
     user_answers = {
         'weather_tolerance': '可以接受',
-        'traffic_tolerance': '舒适优先(避开拥堵)',
+        # 'traffic_tolerance': '舒适优先(避开拥堵)',
         'crowd_tolerance': '偏好人少景点',
         'time_preference': '早上(避开人流)'
     }
@@ -238,7 +238,7 @@ def test_comprehensive_workflow():
     print("\n阶段2: 用户偏好优化")
     user_feedback = {
         'weather_tolerance': '尽量避免',
-        'traffic_tolerance': '时间优先(快速路线)',
+        # 'traffic_tolerance': '时间优先(快速路线)',
         'crowd_tolerance': '必须避开人群'
     }
     
@@ -286,8 +286,8 @@ def main():
     print("🧪 智能旅游攻略规划Agent测试套件")
     print("=" * 60)
     print(f"测试时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"MCP服务: 天气 + 人流 + 交通 + 导航")
-    print(f"智能特性: 天气感知 + 交通优化 + 用户偏好 + RAG增强")
+    print(f"MCP服务: 天气 + 人流 + 导航")
+    print(f"智能特性: 天气感知 + 用户偏好 + RAG增强")
     print()
     
     try:
@@ -304,7 +304,7 @@ def main():
         time.sleep(2)
         
         # 测试3: 交通优化
-        test_traffic_optimization()
+        # test_traffic_optimization()
         
         # 等待避免API限制 
         time.sleep(2)
@@ -329,12 +329,11 @@ def main():
         
         print("\n🎉 所有测试完成！")
         print("\n💡 智能旅游攻略Agent特性总结:")
-        print("  ✅ 多源数据整合 - 天气、人流、交通、导航MCP服务深度融合")
-        print("  ✅ 智能决策流程 - 天气检查 → 路线规划 → 路况分析 → 人流评估")
-        print("  ✅ 动态调整机制 - 极端天气自动调整，交通拥堵智能绕行")
+        print("  ✅ 多源数据整合 - 天气、人流、导航MCP服务深度融合")
+        print("  ✅ 智能决策流程 - 天气检查 → 路线规划 → 人流评估")
         print("  ✅ 用户偏好学习 - 多轮交互优化，个性化推荐")
         print("  ✅ RAG知识增强 - 结合本地知识库，提供深度建议")
-        print("  ✅ 综合评分系统 - 天气、交通、人流多维度量化评估")
+        print("  ✅ 综合评分系统 - 天气、人流多维度量化评估")
         print("  ✅ 实时优化建议 - 基于实时数据提供动态调整方案")
         
     except Exception as e:

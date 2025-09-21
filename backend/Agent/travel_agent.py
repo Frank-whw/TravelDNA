@@ -201,13 +201,13 @@ class TravelAgentService:
         # 评估天气适宜度
         plan.weather_compatibility = self._evaluate_weather_compatibility(plan, user_preferences)
         
-        # 评估交通便利度
-        plan.traffic_score = self._evaluate_traffic_score(plan, user_preferences)
+        # 不再计算交通评分
+        # plan.traffic_score = self._evaluate_traffic_score(plan, user_preferences)
         
         # 评估人流舒适度
         plan.crowd_score = self._evaluate_crowd_score(plan, user_preferences)
         
-        # 计算综合评分
+        # 计算综合评分（已移除交通权重）
         plan.overall_score = self._calculate_overall_score(plan)
         
         # 生成建议
@@ -332,19 +332,17 @@ class TravelAgentService:
         return max(0, min(100, base_score))
     
     def _calculate_overall_score(self, plan: TravelPlan) -> float:
-        """计算综合评分"""
+        """计算综合评分（移除交通维度）"""
         weights = {
-            'weather': 0.25,
-            'traffic': 0.35,
-            'crowd': 0.25,
-            'poi_quality': 0.15
+            'weather': 0.4,
+            'crowd': 0.4,
+            'poi_quality': 0.2
         }
         
         poi_quality_score = sum(poi.rating * 20 for poi in plan.pois) / len(plan.pois) if plan.pois else 80
         
         overall = (
             plan.weather_compatibility * weights['weather'] +
-            plan.traffic_score * weights['traffic'] +
             plan.crowd_score * weights['crowd'] +
             poi_quality_score * weights['poi_quality']
         )
@@ -376,7 +374,7 @@ class TravelAgentService:
         return recommendations
     
     def _generate_adjustments(self, plan: TravelPlan, preferences: TravelPreference) -> List[str]:
-        """生成优化建议"""
+        """生成优化建议（移除交通相关建议）"""
         adjustments = []
         
         if plan.overall_score < 70:
@@ -385,13 +383,14 @@ class TravelAgentService:
         if plan.crowd_score < 60:
             adjustments.append("可考虑选择人流较少的时间段或替代景点")
         
-        if plan.traffic_score < 60:
-            adjustments.append("建议优化交通路线或选择其他交通方式")
+        # 移除交通相关的调整建议
+        # if plan.traffic_score < 60:
+        #     adjustments.append("建议优化交通路线或选择其他交通方式")
         
         return adjustments
     
     def ask_user_preferences(self, plan: TravelPlan) -> Dict:
-        """生成用户偏好问题"""
+        """生成用户偏好问题（移除交通相关问题）"""
         questions = {
             'questions': [
                 {
@@ -400,14 +399,9 @@ class TravelAgentService:
                     'options': ['必须晴天', '可以接受', '无所谓']
                 },
                 {
-                    'key': 'traffic_tolerance',
-                    'question': '您对交通方式的偏好？',
-                    'options': ['时间优先(快速到达)', '舒适优先(避开拥堵)', '费用优先(经济实惠)']
-                },
-                {
                     'key': 'crowd_tolerance',
                     'question': '您对景点人流的容忍度？',
-                    'options': ['偏好人少景点', '适中即可', '不介意人多']
+                    'options': ['偏好人少景点', '适中即可', '不介意多人']
                 },
                 {
                     'key': 'time_preference',
@@ -419,7 +413,7 @@ class TravelAgentService:
         return questions
     
     def adjust_plan_by_preferences(self, plan: TravelPlan, user_answers: Dict) -> TravelPlan:
-        """根据用户偏好调整计划"""
+        """根据用户偏好调整计划（移除交通相关解析与计算）"""
         # 创建新的偏好对象
         preferences = TravelPreference()
         
@@ -429,21 +423,22 @@ class TravelAgentService:
         elif user_answers.get('weather_tolerance') == '无所谓':
             preferences.weather_tolerance = WeatherCondition.POOR
         
-        if user_answers.get('traffic_tolerance') == '时间优先(快速到达)':
-            preferences.time_conscious = True
-        elif user_answers.get('traffic_tolerance') == '舒适优先(避开拥堵)':
-            preferences.comfort_priority = True
-        elif user_answers.get('traffic_tolerance') == '费用优先(经济实惠)':
-            preferences.budget_conscious = True
+        # 不再解析交通相关的偏好
+        # if user_answers.get('traffic_tolerance') == '时间优先(快速到达)':
+        #     preferences.time_conscious = True
+        # elif user_answers.get('traffic_tolerance') == '舒适优先(避开拥堵)':
+        #     preferences.comfort_priority = True
+        # elif user_answers.get('traffic_tolerance') == '费用优先(经济实惠)':
+        #     preferences.budget_conscious = True
         
         if user_answers.get('crowd_tolerance') == '偏好人少景点':
             preferences.crowd_tolerance = CrowdLevel.LOW
-        elif user_answers.get('crowd_tolerance') == '不介意人多':
+        elif user_answers.get('crowd_tolerance') == '不介意多人':
             preferences.crowd_tolerance = CrowdLevel.VERY_HIGH
         
-        # 重新计算评分
+        # 重新计算评分（不再计算交通评分）
         plan.weather_compatibility = self._evaluate_weather_compatibility(plan, preferences)
-        plan.traffic_score = self._evaluate_traffic_score(plan, preferences)
+        # plan.traffic_score = self._evaluate_traffic_score(plan, preferences)
         plan.crowd_score = self._evaluate_crowd_score(plan, preferences)
         plan.overall_score = self._calculate_overall_score(plan)
         

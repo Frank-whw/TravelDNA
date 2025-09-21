@@ -329,7 +329,7 @@ class Config:
     # 服务开关（用于调试和维护）
     ENABLE_WEATHER_SERVICE = True
     ENABLE_CROWD_SERVICE = True
-    ENABLE_TRAFFIC_SERVICE = True
+    ENABLE_TRAFFIC_SERVICE = False
     ENABLE_NAVIGATION_SERVICE = True
     ENABLE_POI_SEARCH_SERVICE = True
     
@@ -397,7 +397,7 @@ class Config:
     ENABLE_ROUTE_PLANNING = True
     ENABLE_WEATHER_ADVICE = True
     ENABLE_CROWD_PREDICTION = True
-    ENABLE_TRAFFIC_OPTIMIZATION = True
+    ENABLE_TRAFFIC_OPTIMIZATION = False
     
     # 实验性功能
     ENABLE_SENTIMENT_ANALYSIS = False
@@ -562,6 +562,7 @@ class TestingConfig(Config):
     ENABLE_WEATHER_SERVICE = False
     ENABLE_CROWD_SERVICE = False
     ENABLE_TRAFFIC_SERVICE = False
+# ENABLE_TRAFFIC_SERVICE = False  # moved to class-based switches; keep disabled globally
 
 
 # 根据环境变量选择配置
