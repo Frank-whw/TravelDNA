@@ -1,10 +1,14 @@
 import os
 from dotenv import load_dotenv
 
-# 加载环境变量
 load_dotenv()
 
 class Config:
-    # 数据库配置
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URI')
-    SQLALCHEMY_TRACK_MODIFICATIONS = os.getenv('SQLALCHEMY_TRACK_MODIFICATIONS', 'False') == 'True'
+    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///community.db')
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key')
+    
+    # Supabase 配置
+    SUPABASE_URL = os.getenv('SUPABASE_URL')
+    SUPABASE_ANON_KEY = os.getenv('SUPABASE_ANON_KEY')
+    SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
