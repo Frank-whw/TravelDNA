@@ -67,69 +67,34 @@ export default function ChatPage() {
       timestamp: "刚刚",
     },
   ])
-  const [isConnected, setIsConnected] = useState(false)
+  const [isConnected, setIsConnected] = useState(true) // 改为默认连接状态
   const [isLoading, setIsLoading] = useState(false)
-  const wsRef = useRef(null)
   const messagesEndRef = useRef(null)
   const userId = "user_" + Math.random().toString(36).substr(2, 9)
 
-  // WebSocket连接管理
+  // 移除 WebSocket 连接，改为检查 API 连接状态
   useEffect(() => {
-    const connectWebSocket = () => {
+    const checkApiConnection = async () => {
       try {
-        const ws = new WebSocket(`ws://localhost:8000/ws/${userId}`)
-        wsRef.current = ws
-
-        ws.onopen = () => {
-          console.log('WebSocket连接已建立')
+        // 检查 Agent API 连接状态
+        const response = await fetch('http://localhost:5001/api/v1/health')
+        if (response.ok) {
           setIsConnected(true)
-        }
-
-        ws.onmessage = (event) => {
-          const data = JSON.parse(event.data)
-          console.log('收到消息:', data)
-          
-          // 添加Agent响应到消息列表
-          const newMessage = {
-            id: Date.now(),
-            type: data.type || "assistant",
-            content: data.content,
-            timestamp: "刚刚",
-            data: data.data || null
-          }
-          
-          setMessages(prev => [...prev, newMessage])
-          
-          // 如果是最后一条响应，停止加载状态
-          if (data.type === "response") {
-            setIsLoading(false)
-          }
-        }
-
-        ws.onclose = () => {
-          console.log('WebSocket连接已关闭')
-          setIsConnected(false)
-          // 3秒后尝试重连
-          setTimeout(connectWebSocket, 3000)
-        }
-
-        ws.onerror = (error) => {
-          console.error('WebSocket错误:', error)
+        } else {
           setIsConnected(false)
         }
       } catch (error) {
-        console.error('WebSocket连接失败:', error)
+        console.warn('Agent API 连接检查失败，将使用离线模式:', error)
         setIsConnected(false)
       }
     }
 
-    connectWebSocket()
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
-    }
+    checkApiConnection()
+    
+    // 每30秒检查一次连接状态
+    const interval = setInterval(checkApiConnection, 30000)
+    
+    return () => clearInterval(interval)
   }, [])
 
   // 自动滚动到底部
@@ -155,17 +120,7 @@ export default function ChatPage() {
     setMessage("")
 
     try {
-      // 优先通过WebSocket发送
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          message: textToSend,
-          user_id: userId
-        }))
-        // 由后端推送消息来结束loading
-        return
-      }
-
-      // WebSocket不可用时，回退至HTTP接口
+      // 直接使用 HTTP API
       const data = await agentApi.chat(textToSend)
       const assistantMsg = {
         id: Date.now() + 1,
@@ -176,13 +131,31 @@ export default function ChatPage() {
       }
       setMessages(prev => [...prev, assistantMsg])
     } catch (err: any) {
+      console.error('API 调用失败:', err)
+      
+      // 提供更友好的错误处理
+      let errorMessage = "抱歉，服务暂时不可用。"
+      
+      if (err?.message?.includes('fetch')) {
+        errorMessage = "网络连接异常，请检查网络连接后重试。"
+      } else if (err?.message?.includes('timeout')) {
+        errorMessage = "请求超时，请稍后重试。"
+      } else if (err?.status === 500) {
+        errorMessage = "服务器内部错误，我们正在修复中。"
+      } else if (err?.status === 404) {
+        errorMessage = "服务接口不存在，请联系技术支持。"
+      }
+      
       const errorMsg = {
         id: Date.now() + 2,
         type: "response" as const,
-        content: `抱歉，服务暂时不可用。错误信息：${err?.message || '未知错误'}`,
+        content: errorMessage,
         timestamp: "刚刚",
       }
       setMessages(prev => [...prev, errorMsg])
+      
+      // 更新连接状态
+      setIsConnected(false)
     } finally {
       setIsLoading(false)
     }

@@ -29,6 +29,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { MapPin, Cloud, Users, Navigation, MessageCircle, Sparkles, TrendingUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -55,6 +56,34 @@ export default function HomePage() {
    * @type {string} 当前搜索输入值
    */
   const [searchQuery, setSearchQuery] = useState("")
+  
+  /**
+   * Next.js 路由器实例 - 用于页面跳转
+   */
+  const router = useRouter()
+
+  /**
+   * 处理搜索功能 - 验证输入并跳转到规划页面
+   */
+  const handleSearch = () => {
+    // 验证用户输入
+    if (!searchQuery.trim()) {
+      alert("请输入您想去的目的地")
+      return
+    }
+    
+    // 跳转到规划页面并传递搜索参数
+    router.push(`/planning?destination=${encodeURIComponent(searchQuery.trim())}`)
+  }
+
+  /**
+   * 处理键盘事件 - 支持回车键触发搜索
+   */
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSearch()
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50">
@@ -127,7 +156,12 @@ export default function HomePage() {
                 className="h-14 text-lg pl-6 pr-32 rounded-full border-2 border-blue-200 focus:border-blue-400"
               />
               {/* 搜索按钮 - 绝对定位在输入框右侧 */}
-              <Button className="absolute right-2 top-2 h-10 px-6 rounded-full">开始规划</Button>
+              <Button 
+                onClick={handleSearch}
+                className="absolute right-2 top-2 h-10 px-6 rounded-full"
+              >
+                开始规划
+              </Button>
             </div>
           </div>
 

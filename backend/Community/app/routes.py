@@ -121,6 +121,9 @@ def get_teams():
     
     # 我加入的队伍
     user = User.query.get(user_id)
+    if not user:
+        return jsonify({"status": "error", "message": "用户不存在"}), 404
+    
     member_teams = user.joined_teams.filter(Team.captain_id != user_id).all()
     #print([team.to_dict() for team in captain_teams])
     

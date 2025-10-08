@@ -5,6 +5,7 @@
  * - 配置开发环境的构建优化选项
  * - 禁用严格的类型检查和ESLint，提升开发效率
  * - 优化图片处理，适配各种部署环境
+ * - 修复 webpack 热更新问题
  * 
  * 配置策略：
  * - 开发阶段优先考虑构建速度和开发体验
@@ -60,6 +61,55 @@ const nextConfig = {
    */
   typescript: {
     ignoreBuildErrors: true,
+  },
+  
+  /**
+   * Webpack 配置 - 修复热更新问题
+   */
+  webpack: (config, { dev, isServer }) => {
+    if (dev && !isServer) {
+      // 修复 webpack 热更新的 ERR_ABORTED 错误
+      config.watchOptions = {
+        poll: 1000,
+        aggregateTimeout: 300,
+        ignored: ['**/node_modules/**', '**/.git/**', '**/.next/**'],
+      }
+      
+      // 优化热更新性能和稳定性
+      config.optimization = {
+        ...config.optimization,
+        removeAvailableModules: false,
+        removeEmptyChunks: false,
+        splitChunks: false,
+      }
+      
+      // 添加更稳定的热更新配置
+      config.infrastructureLogging = {
+        level: 'error',
+      }
+      
+      // 减少热更新文件的生成频率
+      config.snapshot = {
+        managedPaths: [/^(.+?[\\/]node_modules[\\/])/],
+        immutablePaths: [],
+        buildDependencies: {
+          hash: true,
+          timestamp: true,
+        },
+        module: {
+          timestamp: true,
+        },
+        resolve: {
+          timestamp: true,
+        },
+        resolveBuildDependencies: {
+          hash: true,
+          timestamp: true,
+        },
+      }
+    }
+    
+    return config
   },
   
   /**

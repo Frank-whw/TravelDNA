@@ -148,7 +148,7 @@ class Team(db.Model):
 class MatchRecord(db.Model):
     __tablename__ = 'match_record'
     
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     matched_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     matching_score = db.Column(db.Integer, nullable=False)
@@ -183,7 +183,7 @@ class MatchRecord(db.Model):
 class Message(db.Model):
     __tablename__ = 'message'
     
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False)
     sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     content = db.Column(db.Text, nullable=False)
