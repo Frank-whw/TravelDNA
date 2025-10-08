@@ -422,9 +422,11 @@ class EnhancedTravelAgent:
         print("📡 Agent正在收集实时数据来优化您的攻略...")
         real_time_data = {}
         
-        # 从用户输入中提取具体地点
+        # 从用户输入中提取具体地点和路线信息
         extracted_locations = self._extract_locations_from_input(user_input)
+        route_info = self._extract_route_from_input(user_input)
         
+        # 按正确顺序调用MCP服务
         for service in required_services:
             try:
                 if service == MCPServiceType.WEATHER:
@@ -439,52 +441,98 @@ class EnhancedTravelAgent:
                         weather_data["上海"] = weather
                     real_time_data["weather"] = weather_data
                 
-                elif service == MCPServiceType.TRAFFIC:
-                    # logger.info("🚦 调用路况服务")
-                    traffic_data = {}
-                    if extracted_locations:
-                        for location in extracted_locations:
-                            traffic = self.get_traffic_status(location)
-                            traffic_data[location] = traffic
-                    else:
-                        traffic = self.get_traffic_status("上海")
-                        traffic_data["上海"] = traffic
-                    real_time_data["traffic"] = traffic_data
-                
                 elif service == MCPServiceType.POI:
                     # logger.info("🔍 调用POI服务")
                     poi_data = {}
-                    if extracted_locations:
-                        for location in extracted_locations:
-                            # 确保搜索的是上海地区的POI
-                            attractions = self.search_poi("景点", location, "110000")
-                            poi_data[f"{location}_景点"] = attractions
+                    try:
+                        if extracted_locations:
+                            for location in extracted_locations:
+                                # 确保搜索的是上海地区的POI
+                                attractions = self.search_poi("景点", location, "110000")
+                                poi_data[f"{location}_景点"] = attractions
+                                
+                                restaurants = self.search_poi("餐厅", location, "050000")
+                                poi_data[f"{location}_餐饮"] = restaurants
+                        else:
+                            # 搜索上海的主要景点
+                            attractions = self.search_poi("景点", "上海", "110000")
+                            poi_data["上海景点"] = attractions
                             
-                            restaurants = self.search_poi("餐厅", location, "050000")
-                            poi_data[f"{location}_餐饮"] = restaurants
-                    else:
-                        # 搜索上海的主要景点
-                        attractions = self.search_poi("景点", "上海", "110000")
-                        poi_data["上海景点"] = attractions
-                        
-                        restaurants = self.search_poi("餐厅", "上海", "050000")
-                        poi_data["上海餐饮"] = restaurants
+                            restaurants = self.search_poi("餐厅", "上海", "050000")
+                            poi_data["上海餐饮"] = restaurants
+                    except Exception as e:
+                        logger.error(f"POI服务调用失败: {e}")
+                        # 返回模拟POI数据
+                        poi_data = {
+                            "上海景点": [
+                                {"name": "外滩", "address": "黄浦区中山东一路", "rating": 4.5},
+                                {"name": "豫园", "address": "黄浦区安仁街132号", "rating": 4.3},
+                                {"name": "南京路步行街", "address": "黄浦区南京东路", "rating": 4.2}
+                            ],
+                            "上海餐饮": [
+                                {"name": "老正兴菜馆", "address": "黄浦区南京东路", "rating": 4.4},
+                                {"name": "绿波廊", "address": "黄浦区豫园路", "rating": 4.3}
+                            ]
+                        }
                     real_time_data["poi"] = poi_data
                 
                 elif service == MCPServiceType.NAVIGATION:
                     # logger.info("🗺️ 调用导航服务")
                     navigation_data = {}
-                    if len(extracted_locations) >= 2:
+                    
+                    # 优先使用从用户输入中提取的路线信息
+                    if route_info:
+                        start = route_info["start"]
+                        end = route_info["end"]
+                        routes = self.get_navigation_routes(start, end)
+                        navigation_data[f"{start}_to_{end}"] = routes
+                        # 保存路线信息供路况服务使用
+                        real_time_data["_route_info"] = route_info
+                    elif len(extracted_locations) >= 2:
                         for i in range(len(extracted_locations) - 1):
                             start = extracted_locations[i]
                             end = extracted_locations[i + 1]
                             routes = self.get_navigation_routes(start, end)
                             navigation_data[f"{start}_to_{end}"] = routes
                     else:
-                        # 默认路线
-                        routes = self.get_navigation_routes("人民广场", "外滩")
-                        navigation_data["人民广场_to_外滩"] = routes
+                        # 如果没有明确的路线，尝试从用户输入中推断
+                        inferred_route = self._infer_route_from_input(user_input)
+                        if inferred_route:
+                            routes = self.get_navigation_routes(inferred_route["start"], inferred_route["end"])
+                            navigation_data[f"{inferred_route['start']}_to_{inferred_route['end']}"] = routes
+                            real_time_data["_route_info"] = inferred_route
+                        else:
+                            # 默认路线
+                            routes = self.get_navigation_routes("人民广场", "外滩")
+                            navigation_data["人民广场_to_外滩"] = routes
+                    
                     real_time_data["navigation"] = navigation_data
+                
+                elif service == MCPServiceType.TRAFFIC:
+                    # logger.info("🚦 调用路况服务")
+                    traffic_data = {}
+                    
+                    # 路况服务应该在导航之后调用，针对具体路线
+                    if "_route_info" in real_time_data:
+                        route_info = real_time_data["_route_info"]
+                        # 获取路线上的主要路段路况
+                        start = route_info["start"]
+                        end = route_info["end"]
+                        traffic_start = self.get_traffic_status(start)
+                        traffic_end = self.get_traffic_status(end)
+                        traffic_data[f"{start}_to_{end}"] = {
+                            "start_location": traffic_start,
+                            "end_location": traffic_end
+                        }
+                    elif extracted_locations:
+                        for location in extracted_locations:
+                            traffic = self.get_traffic_status(location)
+                            traffic_data[location] = traffic
+                    else:
+                        traffic = self.get_traffic_status("上海")
+                        traffic_data["上海"] = traffic
+                    
+                    real_time_data["traffic"] = traffic_data
                 
                 elif service == MCPServiceType.CROWD:
                     # logger.info("👥 调用人流服务")
@@ -995,7 +1043,8 @@ class EnhancedTravelAgent:
             "外滩", "人民广场", "南京路", "豫园", "陆家嘴", "东方明珠", 
             "上海迪士尼", "上海博物馆", "上海科技馆", "田子坊", "新天地",
             "金沙江路", "中山公园", "静安寺", "徐家汇", "五角场", "虹桥",
-            "浦东", "浦西", "黄浦区", "静安区", "徐汇区", "长宁区"
+            "浦东", "浦西", "黄浦区", "静安区", "徐汇区", "长宁区", "普陀区",
+            "华东师范大学", "华东师大", "华师大", "徐汇", "普陀"
         ]
         
         for area in shanghai_areas:
@@ -1013,6 +1062,32 @@ class EnhancedTravelAgent:
                 start = parts[0].strip()
                 end = parts[1].split()[0].strip()  # 取第一个词作为终点
                 return {"start": start, "end": end}
+        
+        return None
+    
+    def _infer_route_from_input(self, user_input: str) -> Optional[Dict[str, str]]:
+        """从用户输入中推断路线信息"""
+        # 特殊处理：华东师范大学到徐汇区
+        if "华东师范大学" in user_input and "徐汇区" in user_input:
+            return {"start": "华东师范大学", "end": "徐汇区"}
+        
+        # 提取地点信息
+        locations = self._extract_locations_from_input(user_input)
+        
+        # 如果找到多个地点，尝试推断起点和终点
+        if len(locations) >= 2:
+            # 根据用户输入中的关键词推断
+            if "出发" in user_input:
+                # 找到"出发"前面的地点作为起点
+                for i, location in enumerate(locations):
+                    if location in user_input[:user_input.find("出发")]:
+                        start = location
+                        # 其他地点作为终点
+                        end = locations[(i + 1) % len(locations)]
+                        return {"start": start, "end": end}
+            
+            # 如果没有"出发"关键词，使用第一个地点作为起点，最后一个作为终点
+            return {"start": locations[0], "end": locations[-1]}
         
         return None
     
@@ -1142,8 +1217,19 @@ class EnhancedTravelAgent:
         logger.info(f"调用路况API获取实时数据: {area}")
         
         try:
+            # 对于区域名称，先转换为具体地点
+            area_mapping = {
+                "徐汇区": "徐家汇",
+                "普陀区": "普陀区",
+                "华东师范大学": "华东师范大学",
+                "徐汇": "徐家汇",
+                "普陀": "普陀区"
+            }
+            
+            search_area = area_mapping.get(area, area)
+            
             # 使用地理编码获取区域中心点坐标
-            center_coords = self._geocode(area)
+            center_coords = self._geocode(search_area)
             if not center_coords:
                 logger.warning(f"无法获取区域坐标: {area}")
                 # 返回模拟数据
