@@ -14,12 +14,12 @@ sqlalchemy==2.0.23
 python-dotenv==1.0.0
 
 # ==================== HTTP请求 ====================
-requests==2.31.0
+requests>=2.31.0
 aiohttp==3.8.5
 
 # ==================== 数据处理 ====================
 numpy==1.24.3
-pandas==2.0.3
+pandas>=2.0.0
 faker==19.6.2
 orjson==3.9.7
 
@@ -48,11 +48,19 @@ scipy==1.11.3
 pytest==7.4.2
 pytest-asyncio==0.21.1
 
+# ==================== Web爬虫相关 ====================
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+selenium>=4.15.0
+fake-useragent>=1.4.0
+openpyxl>=3.1.0
+
 # ==================== 说明 ====================
 # Agent模块：智能旅游对话系统
 # - 需要requests, numpy, pandas等用于API调用和数据处理
 # - 需要jieba用于中文文本处理
 # - 需要aiohttp, aiofiles用于异步处理
+# - 需要beautifulsoup4, selenium等用于网页爬虫
 #
 # Community模块：社区匹配系统  
 # - 需要flask-sqlalchemy, pymysql用于数据库操作
