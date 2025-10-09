@@ -41,10 +41,10 @@ TravelDNA/
 │   │   ├── app/          # Flask应用
 │   │   ├── models/       # 数据模型
 │   │   └── requirements.txt
-│   └── Agent/            # AI智能助手模块
-│       ├── app.py        # Flask应用入口
-│       ├── travel_agent.py # 核心服务逻辑
-│       ├── data/         # 数据文件
+│   └──Agent/      # AI智能助手模块
+│       ├── enhanced_travel_agent.py # 核心服务逻辑
+│       ├── app.py # 快速启动脚本
+│       ├── config.py     # 配置文件
 │       └── requirements.txt
 └── requirements.txt       # 项目依赖
 ```

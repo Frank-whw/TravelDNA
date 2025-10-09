@@ -1,4 +1,4 @@
-# 智能旅游Agent模块依赖包
+# 增强版智能旅游Agent模块依赖包
 
 # 核心框架
 flask==2.3.3
@@ -9,10 +9,12 @@ python-dotenv==1.0.0
 
 # HTTP请求
 requests==2.31.0
+urllib3==2.0.4
 
 # 数据处理
 numpy==1.24.3
 pandas==2.0.3
+openpyxl==3.1.0
 
 # 日期时间处理
 python-dateutil==2.8.2
@@ -39,6 +41,15 @@ jieba==0.42.1
 # 数学计算
 scipy==1.11.3
 
+# Web爬虫（用于数据采集）
+beautifulsoup4==4.12.0
+lxml==4.9.0
+selenium==4.15.0
+fake-useragent==1.4.0
+
 # 开发和测试
 pytest==7.4.2
 pytest-asyncio==0.21.1
+
+# Python 3兼容
+pathlib2==2.3.7

@@ -43,6 +43,15 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import agentApi from "@/lib/agentApi"
 
+// 类型定义
+interface ThoughtProcess {
+  step: number;
+  thought: string;
+  keywords: string[];
+  reasoning: string;
+  icon: string;
+}
+
 /**
  * 聊天页面主组件 - AI旅游助手对话界面
  * 
@@ -59,7 +68,19 @@ import agentApi from "@/lib/agentApi"
  */
 export default function ChatPage() {
   const [message, setMessage] = useState("")
-  const [messages, setMessages] = useState([
+  const [messages, setMessages] = useState<Array<{
+    id: number;
+    type: "user" | "assistant" | "thinking" | "action" | "response";
+    content: string;
+    timestamp: string;
+    data?: {
+      suggestions?: string[];
+      thoughts?: ThoughtProcess[];
+      extracted_info?: any;
+      weather?: any;
+      raw?: any;
+    };
+  }>>([
     {
       id: 1,
       type: "assistant",
@@ -69,7 +90,7 @@ export default function ChatPage() {
   ])
   const [isConnected, setIsConnected] = useState(true) // 改为默认连接状态
   const [isLoading, setIsLoading] = useState(false)
-  const messagesEndRef = useRef(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   const userId = "user_" + Math.random().toString(36).substr(2, 9)
 
   // 移除 WebSocket 连接，改为检查 API 连接状态
@@ -122,13 +143,22 @@ export default function ChatPage() {
     try {
       // 直接使用 HTTP API
       const data = await agentApi.chat(textToSend)
-      const assistantMsg = {
-        id: Date.now() + 1,
-        type: (data.type as any) || "response",
-        content: data.message || "",
-        timestamp: data.timestamp || "刚刚",
-        data: { suggestions: data.suggestions }
-      }
+      
+          // 处理响应数据，确保正确显示Agent生成的攻略
+          const assistantMsg = {
+            id: Date.now() + 1,
+            type: "assistant" as const,
+            content: data.message || "抱歉，我暂时无法处理您的请求。",
+            timestamp: data.timestamp || new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+            data: { 
+              suggestions: data.suggestions || [],
+              thoughts: data.thoughts || [],  // 添加思考过程
+              extracted_info: data.extracted_info || {},  // 添加提取的信息
+              raw: data // 保留原始数据以便调试
+            }
+          }
+      
+      console.log('收到Agent回复:', assistantMsg)
       setMessages(prev => [...prev, assistantMsg])
     } catch (err: any) {
       console.error('API 调用失败:', err)
@@ -298,7 +328,7 @@ export default function ChatPage() {
 
           {/* Chat Area - 主聊天区域 */}
           <div className="lg:col-span-3">
-            <Card className="h-[600px] flex flex-col">
+            <Card className="h-[700px] flex flex-col">
               {/* 聊天区域头部 */}
               <CardHeader className="border-b">
                 <CardTitle className="flex items-center gap-2">
@@ -332,11 +362,11 @@ export default function ChatPage() {
 
                       {/* 消息气泡 - 根据消息类型应用不同样式 */}
                       <div
-                        className={`max-w-[70%] rounded-lg p-3 ${
+                        className={`max-w-[85%] rounded-lg p-4 ${
                           msg.type === "user" ? "bg-blue-500 text-white" :
                           msg.type === "thinking" ? "bg-purple-50 text-purple-900 border border-purple-200" :
                           msg.type === "action" ? "bg-blue-50 text-blue-900 border border-blue-200" :
-                          "bg-gray-100 text-gray-900"
+                          "bg-white text-gray-900 border border-gray-200 shadow-sm"
                         }`}
                       >
                         {/* 消息类型标识 */}
@@ -359,8 +389,72 @@ export default function ChatPage() {
                           </div>
                         )}
                         
-                        {/* 消息内容 */}
-                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                        {/* 消息内容 - 支持Markdown样式的长文本 */}
+                        <div className={`text-sm whitespace-pre-wrap break-words leading-relaxed ${
+                          msg.type === "user" ? "" : "space-y-2"
+                        }`}>
+                          {/* 将换行符转换为段落分隔 */}
+                          {msg.content.split('\n\n').map((paragraph, idx) => (
+                            <p key={idx} className="mb-2 last:mb-0">
+                              {paragraph.split('\n').map((line, lineIdx) => (
+                                <span key={lineIdx}>
+                                  {line}
+                                  {lineIdx < paragraph.split('\n').length - 1 && <br />}
+                                </span>
+                              ))}
+                            </p>
+                          ))}
+                        </div>
+                        
+        {/* 思考过程展示 */}
+        {msg.data && msg.data.thoughts && msg.data.thoughts.length > 0 && (
+          <div className="mt-3 space-y-2">
+            <div className="text-xs text-gray-600 font-medium">🧠 AI思考过程：</div>
+            <div className="bg-gray-50 rounded-lg p-3 space-y-2 border-l-4 border-blue-200">
+              {msg.data.thoughts.slice(0, 3).map((thought: ThoughtProcess, idx: number) => (
+                <div key={idx} className="flex items-start gap-2 text-xs">
+                  <span className="text-blue-500 font-medium">{thought.icon || '💭'}</span>
+                  <div className="flex-1">
+                    <span className="text-gray-700">{thought.thought}</span>
+                    {thought.keywords && thought.keywords.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {thought.keywords.slice(0, 3).map((keyword: string, kidx: number) => (
+                          <span key={kidx} className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-xs">
+                            {keyword}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {msg.data.thoughts.length > 3 && (
+                <div className="text-xs text-gray-500 text-center pt-1">
+                  ... 还有 {msg.data.thoughts.length - 3} 个思考步骤
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 智能建议标签 */}
+        {msg.data && msg.data.suggestions && msg.data.suggestions.length > 0 && (
+          <div className="mt-3 space-y-2">
+            <div className="text-xs text-gray-600 font-medium">💡 相关建议：</div>
+            <div className="flex flex-wrap gap-2">
+              {msg.data.suggestions.map((suggestion: string, idx: number) => (
+                <Badge
+                  key={idx}
+                  variant="secondary"
+                  className="cursor-pointer hover:bg-blue-100 transition-colors"
+                  onClick={() => setMessage(suggestion)}
+                >
+                  {suggestion}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
                         
                         {/* 天气数据展示 */}
                         {msg.data && msg.data.weather && msg.data.weather.results && msg.data.weather.results.length > 0 && (

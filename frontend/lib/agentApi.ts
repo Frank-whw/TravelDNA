@@ -130,7 +130,20 @@ class AgentApiService {
   /**
    * AI聊天对话
    */
-  async chat(message: string, context?: any): Promise<{ message: string; suggestions?: string[]; type?: string; timestamp?: string }> {
+  async chat(message: string, context?: any): Promise<{ 
+    message: string; 
+    suggestions?: string[]; 
+    type?: string; 
+    timestamp?: string;
+    thoughts?: Array<{
+      step: number;
+      thought: string;
+      keywords: string[];
+      reasoning: string;
+      icon: string;
+    }>;
+    extracted_info?: any;
+  }> {
     return this.request('/chat', {
       method: 'POST',
       body: JSON.stringify({
