@@ -20,10 +20,11 @@
 - **开发工具**：TypeScript + ESLint
 
 ### 后端技术栈
-- **Community模块**：Flask + SQLAlchemy
-- **Agent模块**：Flask + 智能推荐算法
+- **Community模块**：Flask + SQLAlchemy + SQLite
+- **Agent模块**：Flask + 增强版智能推荐算法 + 实时数据集成
 - **数据库**：SQLite（开发环境）
 - **API设计**：RESTful API
+- **实时数据**：高德地图API、天气API、交通API
 
 ## 项目结构
 ```
@@ -32,21 +33,41 @@ TravelDNA/
 │   ├── app/                 # Next.js App Router
 │   │   ├── chat/           # AI聊天页面
 │   │   ├── community/      # 社区功能页面
-│   │   └── layout.tsx      # 全局布局
+│   │   ├── planning/       # 旅游规划页面
+│   │   ├── globals.css     # 全局样式
+│   │   ├── layout.tsx      # 全局布局
+│   │   └── page.tsx        # 首页
 │   ├── components/         # 可复用组件
+│   │   ├── ui/            # UI基础组件
+│   │   └── ...            # 业务组件
 │   ├── lib/               # 工具库和API服务
-│   └── public/            # 静态资源
+│   ├── public/            # 静态资源
+│   ├── components.json    # shadcn/ui配置
+│   ├── next.config.mjs    # Next.js配置
+│   ├── package.json       # 前端依赖
+│   ├── tailwind.config.ts # Tailwind配置
+│   └── tsconfig.json      # TypeScript配置
 ├── backend/               # 后端项目
 │   ├── Community/         # 社区功能模块
 │   │   ├── app/          # Flask应用
 │   │   ├── models/       # 数据模型
+│   │   ├── app.py        # 启动文件
 │   │   └── requirements.txt
-│   └──Agent/      # AI智能助手模块
-│       ├── enhanced_travel_agent.py # 核心服务逻辑
-│       ├── app.py # 快速启动脚本
+│   └── Agent/            # AI智能助手模块
+│       ├── data/         # 数据文件
+│       │   ├── attractions/ # 景点数据
+│       │   ├── rag_corpus/  # RAG语料库
+│       │   └── reviews/     # 评论数据
+│       ├── app.py        # 启动文件
 │       ├── config.py     # 配置文件
-│       └── requirements.txt
-└── requirements.txt       # 项目依赖
+│       ├── requirements.txt
+│       └── travel_agent.py # 核心服务逻辑
+├── supabase/             # Supabase配置
+├── .env.example          # 环境变量示例
+├── .gitignore           # Git忽略文件
+├── PROJECT_STRUCTURE.md # 项目结构说明
+├── README.md            # 项目说明文档
+└── requirements.txt     # 项目依赖
 ```
 
 
@@ -65,17 +86,33 @@ TravelDNA/
    cd TravelDNA
    ```
 
-2. **安装Python依赖**
+2. **安装后端依赖**
+   
+   安装Community模块依赖：
    ```bash
+   cd backend/Community
+   pip install -r requirements.txt
+   ```
+   
+   安装Agent模块依赖：
+   ```bash
+   cd ../Agent
    pip install -r requirements.txt
    ```
 
 3. **安装前端依赖**
    ```bash
-   cd frontend
+   cd ../../frontend
    npm install
    # 或使用 pnpm
    pnpm install
+   ```
+
+4. **环境配置**
+   ```bash
+   # 复制环境变量示例文件
+   cp .env.example .env
+   # 根据需要修改 .env 文件中的配置
    ```
 
 ### 运行项目
@@ -114,38 +151,61 @@ npm run dev
 
 **基础URL**: `http://localhost:5000/api/v1`
 
+#### 系统管理
+- `GET /init-data` - 初始化默认数据
+
 #### 用户管理
-- `GET /users/profile` - 获取用户资料
-- `PUT /users/profile` - 更新用户资料
+- `GET /users/{id}` - 获取用户信息
+- `POST /users` - 创建用户
+- `PUT /users/{id}` - 更新用户信息
 
 #### 队伍管理
-- `GET /teams` - 获取队伍列表
+- `GET /teams` - 获取队伍列表（需要user_id参数）
 - `POST /teams` - 创建队伍
 - `DELETE /teams/{id}` - 删除队伍
 - `POST /teams/{id}/members` - 添加队伍成员
+- `DELETE /teams/{id}/members/{user_id}` - 移除队伍成员
 
 #### 消息系统
-- `GET /teams/{id}/messages` - 获取队伍消息
+- `GET /teams/{id}/messages` - 获取队伍消息（支持lastMsgId增量获取）
 - `POST /teams/{id}/messages` - 发送消息
+
+#### 匹配系统
+- `GET /users/{id}/matches` - 获取用户匹配记录
+- `POST /users/{id}/find-matches` - 查找匹配用户
 
 ### Agent模块 API
 
 **基础URL**: `http://localhost:5001/api/v1`
 
+#### 系统状态
+- `GET /health` - 健康检查
+
 #### AI聊天
 - `POST /chat` - AI智能问答
+  ```json
+  {
+    "message": "用户消息",
+    "context": {
+      "user_id": "用户ID"
+    }
+  }
+  ```
 
 #### 旅游规划
-- `POST /travel/plan` - 创建旅游计划
+- `POST /travel-plan` - 创建旅游计划
 - `GET /travel/plan/{id}` - 获取计划详情
 - `POST /travel/plan/{id}/adjust` - 调整计划
 - `POST /travel/plan/{id}/optimize` - 优化路线
 
 #### 信息查询
-- `GET /travel/poi/search` - 搜索景点
+- `GET /poi/search` - 搜索景点
 - `GET /travel/weather` - 获取天气信息
 - `GET /travel/traffic` - 获取交通信息
 - `GET /travel/crowd` - 获取人流信息
+
+#### 偏好设置
+- `GET /travel/preferences/questions` - 获取偏好问题列表
 
 ## 开发指南
 
@@ -194,10 +254,21 @@ npm run dev
 NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
 NEXT_PUBLIC_AGENT_API_URL=http://localhost:5001/api/v1
 
-# 后端配置
+# Community后端配置
 FLASK_ENV=development
 DATABASE_URL=sqlite:///travel.db
 SECRET_KEY=your-secret-key
+
+# Agent后端配置
+FLASK_HOST=0.0.0.0
+FLASK_PORT=5001
+FLASK_DEBUG=False
+
+# API密钥配置（Agent模块需要）
+AMAP_API_KEY=your-amap-api-key
+AMAP_NAVIGATION_KEY=your-navigation-key
+AMAP_TRAFFIC_KEY=your-traffic-key
+WEATHER_API_KEY=your-weather-api-key
 ```
 
 ## 贡献指南
