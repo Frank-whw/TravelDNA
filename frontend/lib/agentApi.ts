@@ -72,6 +72,103 @@ export interface TravelPlan {
   created_at?: string;
 }
 
+export interface ShanghaiDatasetSummary {
+  city: string;
+  dataset_size: number;
+  sample_pois: Array<{
+    id: string;
+    name: string;
+    district: string;
+    category: string;
+    best_for?: string[];
+    price_level?: string;
+  }>;
+  themes: Array<{ id: string; label: string }>;
+  seasonal_notes: Record<string, string>;
+}
+
+export type BudgetLevelKey = 'low' | 'medium' | 'medium_high' | 'high';
+
+export interface ShanghaiRecommendationPayload {
+  user_id?: string;
+  city?: string;
+  travel_days?: number;
+  budget?: number;
+  budget_level?: BudgetLevelKey;
+  travel_style?: string;
+  interests?: string[];
+  start_date?: string;
+  end_date?: string;
+  weather_adaptive?: boolean;
+  avoid_crowd?: boolean;
+  traffic_optimization?: boolean;
+}
+
+export interface ShanghaiRecommendationResponse {
+  user_profile: {
+    user_id: string;
+    tags: Record<string, number>;
+    top_tags: string[];
+    travel_style?: string;
+    budget_level: {
+      key: BudgetLevelKey;
+      label?: string;
+      range?: string;
+    };
+    interests: string[];
+    preferences: {
+      weather_adaptive: boolean;
+      avoid_crowd: boolean;
+      traffic_optimization: boolean;
+    };
+  };
+  plan_summary: {
+    city: string;
+    travel_days: number;
+    budget_level: {
+      key: BudgetLevelKey;
+      label?: string;
+      range?: string;
+    };
+    highlights: string[];
+  };
+  itinerary: Array<{
+    day: number;
+    date?: string | null;
+    focus?: string | null;
+    weather_note?: string | null;
+    spots: Array<{
+      id: string;
+      name: string;
+      district: string;
+      category: string;
+      score: number;
+      schedule: string;
+      reasons: string[];
+      price_level?: string;
+      crowd_level?: string;
+      duration_hours?: number;
+      indoor?: boolean;
+    }>;
+  }>;
+  backup_options: Array<{
+    id: string;
+    name: string;
+    district: string;
+    category: string;
+    score: number;
+    reason: string[];
+  }>;
+  analytics: {
+    weather_advice: string[];
+    indoor_ratio: number;
+    crowd_strategy: string;
+    traffic_tip: string;
+  };
+  raw_scores: Record<string, any>;
+  dataset_version: string;
+}
+
 export interface PreferenceQuestion {
   id: string;
   question: string;
@@ -256,6 +353,25 @@ class AgentApiService {
     }
     
     return this.request(`/travel/crowd?${params.toString()}`);
+  }
+
+  /**
+   * 获取上海旅游数据占位信息
+   */
+  async getShanghaiDataset(): Promise<ShanghaiDatasetSummary> {
+    return this.request('/shanghai/dataset');
+  }
+
+  /**
+   * 生成上海智能推荐行程
+   */
+  async getShanghaiRecommendations(
+    payload: ShanghaiRecommendationPayload
+  ): Promise<ShanghaiRecommendationResponse> {
+    return this.request('/shanghai/recommendations', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 }
 

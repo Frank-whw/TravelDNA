@@ -1061,8 +1061,8 @@ class EnhancedTravelAgent:
     def _plan_api_calls(self, extracted_info: Dict[str, Any], thoughts: List[ThoughtProcess]) -> Dict[str, Any]:
         """规划API调用策略"""
         api_plan = {
-            "weather": False,
-            "poi": False,
+            "weather": True,
+            "poi": True,
             "navigation": False,
             "traffic": False,
             "crowd": False,
@@ -1128,8 +1128,15 @@ class EnhancedTravelAgent:
             print("  🌤️  正在获取天气信息...")
             weather_data = {}
             for location in locations:
-                weather = self.get_weather(location, context.travel_preferences.start_date)
-                weather_data[location] = weather
+                try:
+                    weather = self.get_weather(location, context.travel_preferences.start_date)
+                except Exception as e:
+                    logger.warning(f"获取{location}天气失败: {e}")
+                    weather = []
+                weather_data[location] = weather or []
+            
+            if not weather_data:
+                weather_data["上海"] = []
             real_time_data["weather"] = weather_data
         
         # 调用输入提示API（智能选择关键词）
@@ -1202,6 +1209,378 @@ class EnhancedTravelAgent:
         print("  ✅ 数据收集完成！")
         return real_time_data
     
+    def _build_environmental_recommendations(self, extracted_info: Dict[str, Any],
+                                             real_time_data: Dict[str, Any],
+                                             context: UserContext) -> Dict[str, Any]:
+        """融合天气与POI的综合推荐分析"""
+        locations = list(extracted_info.get('locations') or [])
+        weather_map = real_time_data.get("weather") or {}
+        poi_map = real_time_data.get("poi") or {}
+        
+        if not locations:
+            derived_locations = list(weather_map.keys())
+            if not derived_locations:
+                derived_locations = [key.split("_")[0] for key in poi_map.keys()]
+            locations = derived_locations or ["上海"]
+        
+        preferences = set()
+        for key in ("activity_types", "preferences"):
+            pref_list = extracted_info.get(key) or []
+            preferences.update(pref_list)
+        
+        budget_info = extracted_info.get('budget_info') or {}
+        budget_level = budget_info.get('level')
+        
+        recommendations = []
+        
+        for location in locations:
+            weather_records = self._get_weather_records_for_location(weather_map, location)
+            weather_analysis = self._analyze_weather_condition(weather_records)
+            
+            collected_pois = self._collect_pois_for_location(poi_map, location)
+            scored_pois = []
+            for category_label, poi in collected_pois:
+                score, reasons = self._score_poi_candidate(
+                    poi,
+                    category_label,
+                    weather_analysis,
+                    preferences,
+                    budget_level
+                )
+                scored_pois.append({
+                    "name": poi.name,
+                    "category": category_label or poi.category,
+                    "address": poi.address,
+                    "score": round(score, 1),
+                    "reasons": reasons,
+                    "price": poi.price,
+                    "business_hours": poi.business_hours
+                })
+            
+            scored_pois.sort(key=lambda x: x["score"], reverse=True)
+            
+            recommendations.append({
+                "location": location,
+                "weather": weather_analysis,
+                "top_pois": scored_pois[:5],
+                "indoor_priority": not weather_analysis.get("suitable_for_outdoor", True),
+                "data_available": bool(collected_pois)
+            })
+        
+        overall_tips = self._generate_overall_tips(recommendations)
+        
+        return {
+            "generated_at": datetime.now().isoformat(),
+            "locations": recommendations,
+            "overall_tips": overall_tips
+        }
+    
+    def _get_weather_records_for_location(self, weather_map: Dict[str, Any], location: str) -> List[WeatherInfo]:
+        """获取指定地点的天气记录，必要时回退到其他地点"""
+        if not weather_map:
+            return []
+        
+        if location in weather_map and weather_map[location]:
+            return weather_map[location]
+        
+        for key, records in weather_map.items():
+            if location in key and records:
+                return records
+        
+        for records in weather_map.values():
+            if records:
+                return records
+        
+        return []
+    
+    def _analyze_weather_condition(self, weather_records: List[WeatherInfo]) -> Dict[str, Any]:
+        """根据天气数据生成可用性评估"""
+        if not weather_records:
+            return {
+                "summary": "暂无天气数据",
+                "condition": "unknown",
+                "temperature": "未知",
+                "average_temperature": None,
+                "suitable_for_outdoor": False,
+                "advice": "暂无可靠天气信息，请提醒用户出行前再次确认天气预报。",
+                "score": 50
+            }
+        
+        record = weather_records[0] if isinstance(weather_records, list) else weather_records
+        weather_text = getattr(record, "weather", "") or ""
+        temperature_text = getattr(record, "temperature", "") or ""
+        temp_value = self._parse_temperature_value(temperature_text)
+        
+        condition = "moderate"
+        score = 70
+        suitable_for_outdoor = True
+        advice = "天气整体适宜，可以灵活安排室内外活动。"
+        
+        if any(keyword in weather_text for keyword in ["雷", "暴雨", "台风", "大风", "冰雹"]):
+            condition = "extreme"
+            score = 20
+            suitable_for_outdoor = False
+            advice = "天气较为极端，请优先选择室内活动，并留意官方安全预警。"
+        elif "雨" in weather_text:
+            condition = "rainy"
+            score = 45
+            suitable_for_outdoor = False
+            advice = "有降雨，建议准备雨具，把重点放在室内或半室内项目上。"
+        elif "雪" in weather_text:
+            condition = "snow"
+            score = 40
+            suitable_for_outdoor = False
+            advice = "可能有降雪或湿冷，注意防滑保暖，多安排室内体验。"
+        elif any(keyword in weather_text for keyword in ["阴", "多云"]):
+            condition = "cloudy"
+            score = 65
+            advice = "多云天气，光线柔和，适合轻松散步或艺术展览等活动。"
+        elif any(keyword in weather_text for keyword in ["晴", "阳"]):
+            condition = "sunny"
+            score = 85
+            advice = "晴朗天气，适合户外活动，也别忘了补水和防晒。"
+        
+        if temp_value is not None:
+            if temp_value >= 33:
+                score -= 10
+                advice += " 气温偏高，户外时段请安排在早晚并注意补水。"
+            elif temp_value <= 5:
+                score -= 10
+                suitable_for_outdoor = False
+                advice += " 气温较低，需要防寒保暖，可多考虑室内选项。"
+        
+        return {
+            "summary": weather_text or "暂无天气描述",
+            "condition": condition,
+            "temperature": temperature_text or "未知",
+            "average_temperature": temp_value,
+            "suitable_for_outdoor": suitable_for_outdoor,
+            "advice": advice,
+            "score": max(min(score, 100), 0)
+        }
+    
+    def _parse_temperature_value(self, temperature_text: str) -> Optional[float]:
+        """解析温度字符串，返回平均温度"""
+        if not temperature_text:
+            return None
+        matches = re.findall(r'-?\d+', temperature_text)
+        if not matches:
+            return None
+        values = [int(m) for m in matches]
+        if not values:
+            return None
+        return sum(values) / len(values)
+    
+    def _collect_pois_for_location(self, poi_map: Dict[str, List[POIInfo]], location: str) -> List[Tuple[str, POIInfo]]:
+        """收集与地点相关的POI"""
+        if not poi_map:
+            return []
+        
+        collected: List[Tuple[str, POIInfo]] = []
+        for key, pois in poi_map.items():
+            if not pois:
+                continue
+            key_location, _, category_label = key.partition("_")
+            matches_location = (key_location == location) or (location in key_location) or (location in key)
+            if matches_location:
+                for poi in pois:
+                    normalized_poi = poi
+                    if isinstance(poi, dict):
+                        normalized_poi = POIInfo(
+                            name=poi.get("name", ""),
+                            address=poi.get("address", ""),
+                            rating=float(poi.get("rating", 0) or 0),
+                            business_hours=poi.get("business_hours", "") or poi.get("open_time", ""),
+                            price=str(poi.get("price", "")),
+                            distance=str(poi.get("distance", "")),
+                            category=poi.get("category", ""),
+                            reviews=poi.get("reviews", [])
+                        )
+                    collected.append((category_label or normalized_poi.category, normalized_poi))
+        
+        if not collected:
+            for key, pois in poi_map.items():
+                if pois:
+                    fallback_category = key.partition("_")[2]
+                    for poi in pois:
+                        normalized_poi = poi
+                        if isinstance(poi, dict):
+                            normalized_poi = POIInfo(
+                                name=poi.get("name", ""),
+                                address=poi.get("address", ""),
+                                rating=float(poi.get("rating", 0) or 0),
+                                business_hours=poi.get("business_hours", "") or poi.get("open_time", ""),
+                                price=str(poi.get("price", "")),
+                                distance=str(poi.get("distance", "")),
+                                category=poi.get("category", ""),
+                                reviews=poi.get("reviews", [])
+                            )
+                        collected.append((fallback_category or normalized_poi.category, normalized_poi))
+                    break
+        
+        return collected
+    
+    def _is_outdoor_poi(self, poi: POIInfo, category_label: Optional[str]) -> bool:
+        """判断POI是否偏户外场景"""
+        text = f"{poi.category or ''}{category_label or ''}{poi.name or ''}"
+        outdoor_keywords = ["公园", "广场", "景区", "风景", "户外", "古镇", "滨江", "滨水", "步道", "花园", "绿地", "亲水", "动物园", "植物园", "露台", "天台"]
+        return any(keyword in text for keyword in outdoor_keywords)
+    
+    def _is_indoor_poi(self, poi: POIInfo, category_label: Optional[str]) -> bool:
+        """判断POI是否偏室内场景"""
+        text = f"{poi.category or ''}{category_label or ''}{poi.name or ''}"
+        indoor_keywords = ["博物馆", "美术馆", "展览", "购物", "商场", "百货", "餐厅", "咖啡", "KTV", "剧院", "水族馆", "书店", "市集", "体验馆"]
+        return any(keyword in text for keyword in indoor_keywords)
+    
+    def _infer_price_level(self, price_text: str) -> Optional[str]:
+        """根据价格信息判断消费档次"""
+        if not price_text:
+            return None
+        matches = re.findall(r'\d+', price_text)
+        if not matches:
+            return None
+        amount = int(matches[0])
+        if amount <= 80:
+            return "low"
+        if amount <= 180:
+            return "medium"
+        if amount <= 300:
+            return "medium_high"
+        return "high"
+    
+    def _score_poi_candidate(self, poi: POIInfo, category_label: Optional[str],
+                             weather_analysis: Dict[str, Any],
+                             preferences: set,
+                             budget_level: Optional[str]) -> Tuple[float, List[str]]:
+        """计算POI综合得分及推荐理由"""
+        score = 40.0
+        reasons: List[str] = []
+        
+        rating = poi.rating if isinstance(poi.rating, (int, float)) else 0
+        if rating and rating > 0:
+            score += min(rating * 18, 60)
+            reasons.append(f"大众评分 {rating:.1f} 分")
+        else:
+            reasons.append("口碑信息有限，以现场体验为准")
+        
+        if self._is_outdoor_poi(poi, category_label):
+            reasons.append("户外体验感强")
+            if not weather_analysis.get("suitable_for_outdoor", True):
+                score -= 25
+                reasons.append("当前天气不利于长时间户外，建议作为备选")
+            else:
+                score += 12
+        elif self._is_indoor_poi(poi, category_label):
+            reasons.append("室内环境舒适")
+            if not weather_analysis.get("suitable_for_outdoor", True):
+                score += 18
+            else:
+                score += 6
+        
+        preference_labels = {
+            "local_culture": "风土人情",
+            "local_specialty": "当地特色",
+            "off_the_beaten_path": "小众探索",
+            "niche": "小众体验",
+            "internet_famous": "网红打卡",
+            "photo_spots": "拍照",
+            "food_focused": "美食",
+            "shopping_focused": "购物",
+            "history_focused": "历史文化",
+            "nature_focused": "自然风光",
+            "art_focused": "艺术",
+            "nightlife": "夜生活",
+            "slow_paced": "慢节奏",
+            "in_depth": "深度体验",
+            "购物": "购物",
+            "美食": "美食",
+            "文化": "文化",
+            "娱乐": "娱乐",
+            "自然": "自然",
+            "亲子": "亲子",
+            "休闲": "休闲"
+        }
+        
+        poi_text = f"{poi.name or ''}{poi.category or ''}{category_label or ''}"
+        for pref in preferences:
+            pref_display = preference_labels.get(pref, pref)
+            if pref_display and pref_display != pref and pref_display in poi_text:
+                score += 10
+                reasons.append(f"匹配偏好「{pref_display}」")
+            elif pref in poi_text:
+                score += 10
+                reasons.append(f"匹配偏好「{pref}」")
+        
+        price_level = self._infer_price_level(poi.price)
+        if budget_level and price_level:
+            if budget_level == "low" and price_level in ("medium_high", "high"):
+                score -= 18
+                reasons.append("价格偏高，注意控制预算")
+            elif budget_level == "high" and price_level in ("low", "medium"):
+                score += 8
+                reasons.append("价格亲民，可适当升级体验")
+            elif budget_level == price_level:
+                score += 6
+                reasons.append("价格与预算匹配")
+        
+        return max(min(score, 100), 0), list(dict.fromkeys(reasons))
+    
+    def _generate_overall_tips(self, recommendations: List[Dict[str, Any]]) -> List[str]:
+        """提炼整体提示"""
+        tips: List[str] = []
+        
+        if not recommendations:
+            return ["尚未收集到有效的天气或POI数据，请提醒用户稍后再试。"]
+        
+        challenging_weather = [
+            rec for rec in recommendations
+            if rec["weather"].get("condition") in ("extreme", "rainy", "snow") or rec["weather"].get("score", 0) < 55
+        ]
+        if challenging_weather:
+            for rec in challenging_weather:
+                tips.append(f"{rec['location']}天气提示：{rec['weather'].get('advice', '请关注天气变化')}。")
+        else:
+            tips.append("当前整体天气友好，可以安排室内外结合的丰富行程。")
+        
+        indoor_priority = any(rec.get("indoor_priority") for rec in recommendations)
+        if indoor_priority:
+            tips.append("为确保体验舒适，建议准备至少一条以室内体验为主的备用路线。")
+        
+        missing_poi = [rec for rec in recommendations if not rec.get("data_available")]
+        if missing_poi:
+            tips.append("部分地点暂无权威POI数据，可考虑自行补充当地热门场所。")
+        
+        return tips
+    
+    def _format_analysis_for_prompt(self, analysis: Dict[str, Any]) -> str:
+        """将综合分析结果转为文本"""
+        if not analysis:
+            return "暂无综合分析结果，请提醒补充实时数据。"
+        
+        lines: List[str] = []
+        for rec in analysis.get("locations", []):
+            weather = rec.get("weather", {})
+            location_name = rec.get("location", "上海")
+            lines.append(
+                f"- {location_name}：天气 {weather.get('summary', '未知')}，温度 {weather.get('temperature', '未知')}，"
+                f"户外适宜：{'是' if weather.get('suitable_for_outdoor') else '否'}。建议：{weather.get('advice', '')}"
+            )
+            top_pois = rec.get("top_pois", [])
+            if top_pois:
+                for poi in top_pois[:3]:
+                    reason_text = "；".join(poi.get("reasons", [])) if poi.get("reasons") else "综合表现较好"
+                    lines.append(
+                        f"    · {poi.get('name')}（{poi.get('category') or '未分类'}，综合评分 {poi.get('score')}）—{reason_text}"
+                    )
+            else:
+                lines.append("    · 暂无合适的POI，建议补充相关地点数据。")
+        
+        overall_tips = analysis.get("overall_tips")
+        if overall_tips:
+            lines.append("整体提示：" + "；".join(overall_tips))
+        
+        return "\n".join(lines)
+    
     def _generate_final_decision(self, user_input: str, thoughts: List[ThoughtProcess], 
                                 extracted_info: Dict[str, Any], real_time_data: Dict[str, Any],
                                 context: UserContext) -> str:
@@ -1254,6 +1633,11 @@ class EnhancedTravelAgent:
    - 给出具体的时间、地址、价格
    - 分享实用的避坑tips
 
+5. **必须反馈的要点**：
+   - 无论用户是否提及，都要明确说明天气状况（含温度、对户外活动的影响）
+   - 无论用户是否提及，都要提供至少3个核心POI或体验的推荐理由
+   - 若实时数据缺失，需诚实告知并给出替代建议
+
 📝 回复结构建议：
 1. **温暖的开场**（共情+理解需求）
 2. **我的思考**（简要说明规划逻辑）
@@ -1270,6 +1654,9 @@ class EnhancedTravelAgent:
         ])
         
         # 转换数据为可序列化格式
+        recommendation_analysis = self._build_environmental_recommendations(extracted_info, real_time_data, context)
+        real_time_data["analysis"] = recommendation_analysis
+        
         serializable_data = self._convert_to_serializable(real_time_data)
         
         # 构建人文信息摘要
@@ -1329,6 +1716,10 @@ class EnhancedTravelAgent:
 2. 必须根据情感需求调整推荐（如：浪漫氛围、避开人群等）
 3. 必须考虑预算档次来推荐合适的消费场所
 4. 在攻略开头简要说明你的思考逻辑和对用户需求的理解"""
+        
+        if recommendation_analysis:
+            analysis_text = self._format_analysis_for_prompt(recommendation_analysis)
+            user_message += f"\n附加分析：\n{analysis_text}\n"
         
         messages = [
             {"role": "system", "content": system_prompt},
@@ -1545,6 +1936,7 @@ class EnhancedTravelAgent:
 5. 根据人流信息推荐最佳游览时间
 6. 提供具体的地址、交通方式、费用预算
 7. 给出贴心的温馨提示和注意事项
+8. 请务必在回复中明确说明天气状况（含温度及其对行程的影响）以及核心POI推荐理由；若数据缺失，需要如实告知并提供备选建议
 
 请生成详细、实用、富有人情味的旅游攻略。"""
         
@@ -1877,6 +2269,8 @@ class EnhancedTravelAgent:
 - 如果用户询问特定地点的交通情况，请重点回答该地点的路况信息
 - 所有推荐的地点必须是上海地区的
 - 必须使用提供的实时数据，不要编造信息
+- 无论用户是否提及，都要明确说明天气状况（含温度及对行程的影响）和核心POI推荐理由
+- 若缺少相关数据，需要坦诚告知并提供替代建议
 
 请根据提供的实时数据，为用户生成详细、实用的旅游攻略。"""
         
@@ -1897,6 +2291,10 @@ class EnhancedTravelAgent:
                     if weather and len(weather) > 0:
                         weather_data = weather[0] if isinstance(weather, list) else weather
                         message += f"  {location}：{weather_data.weather}，{weather_data.temperature}\n"
+                    else:
+                        message += f"  {location}：暂无实时天气数据\n"
+            else:
+                message += "🌤️ 天气信息：暂无实时数据，请提醒用户关注临近天气预报。\n"
             
             if "poi" in real_time_data:
                 poi_info = real_time_data["poi"]
@@ -1905,8 +2303,19 @@ class EnhancedTravelAgent:
                     if pois and len(pois) > 0:
                         message += f"  {category}：\n"
                         for poi in pois[:3]:
-                            if poi.name and len(poi.name) > 2:
-                                message += f"    - {poi.name}（评分：{poi.rating}星）\n"
+                            poi_name = getattr(poi, "name", None)
+                            poi_rating = getattr(poi, "rating", None)
+                            if poi_name is None and isinstance(poi, dict):
+                                poi_name = poi.get("name")
+                            if poi_rating is None and isinstance(poi, dict):
+                                poi_rating = poi.get("rating")
+                            if poi_name and len(poi_name) > 2:
+                                rating_text = f"{poi_rating}星" if poi_rating not in (None, "") else "暂无评分"
+                                message += f"    - {poi_name}（评分：{rating_text}）\n"
+                    else:
+                        message += f"  {category}：暂无符合条件的POI数据\n"
+            else:
+                message += "🎯 景点信息：暂无实时数据，可结合历史热门景点作为备选。\n"
             
             if "traffic" in real_time_data:
                 traffic_info = real_time_data["traffic"]
@@ -1921,6 +2330,11 @@ class EnhancedTravelAgent:
                 for location, crowd in crowd_info.items():
                     if crowd and "description" in crowd:
                         message += f"  {location}：{crowd['description']}\n"
+            
+            if "analysis" in real_time_data:
+                analysis_text = self._format_analysis_for_prompt(real_time_data["analysis"])
+                message += "📊 综合推荐分析：\n"
+                message += f"{analysis_text}\n"
         
         message += "\n请基于以上信息，为用户生成详细的旅游攻略。"
         

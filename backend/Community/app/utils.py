@@ -53,13 +53,12 @@ def find_matches(user_id, limit=8):
         score = calculate_match_score(user, other_user)
         
         # 只考虑匹配度70分以上的
-        if score >= 0:
-            # 检查是否已有匹配记录
-            existing_match = MatchRecord.query.filter_by(
-                user_id=user_id,
-                matched_user_id=other_user.id
-            ).first()
-            
+        existing_match = MatchRecord.query.filter_by(
+            user_id=user_id,
+            matched_user_id=other_user.id
+        ).first()
+
+        if score >= 70:
             if existing_match:
                 # 更新现有匹配记录
                 existing_match.matching_score = score
@@ -76,6 +75,10 @@ def find_matches(user_id, limit=8):
                 db.session.add(new_match)
                 db.session.commit()
                 matches.append(new_match)
+        elif existing_match and existing_match.is_valid:
+            existing_match.matching_score = score
+            existing_match.is_valid = False
+            db.session.commit()
     
     # 按匹配度排序并返回前limit个结果
     matches.sort(key=lambda x: x.matching_score, reverse=True)

@@ -34,8 +34,18 @@
 
 "use client"
 
-import { useState } from "react"
-import { MapPin, Users, Clock, Cloud, Navigation, Star, Plus, Settings } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import {
+  MapPin,
+  Users,
+  Clock,
+  Cloud,
+  Navigation,
+  Star,
+  Plus,
+  Settings,
+  Loader2,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -45,41 +55,138 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import agentApi, {
+  BudgetLevelKey,
+  ShanghaiDatasetSummary,
+  ShanghaiRecommendationPayload,
+  ShanghaiRecommendationResponse,
+} from "@/lib/agentApi"
+import { cn } from "@/lib/utils"
 
-/**
- * 智能规划页面主组件 - 旅游行程定制和生成
- * 
- * 状态管理：
- * - budget: 用户预算范围（数组格式适配Slider组件）
- * - duration: 旅行天数（数组格式）
- * 
- * 组件结构：
- * 1. Header - 顶部导航（品牌、导航菜单、我的行程）
- * 2. Planning Form - 左侧规划设置表单
- * 3. Results Panel - 右侧结果展示区域
- * 
- * @returns {JSX.Element} 完整的规划页面布局
- */
+const INTEREST_OPTIONS = [
+  "历史文化",
+  "自然风光",
+  "美食",
+  "购物",
+  "夜生活",
+  "博物馆",
+  "户外运动",
+  "温泉",
+  "亲子互动",
+  "艺术设计",
+  "潮流打卡",
+]
+
+const DEFAULT_CITY = "上海"
+
+const LEVEL_LABEL: Record<BudgetLevelKey, string> = {
+  low: "经济型",
+  medium: "舒适型",
+  medium_high: "品质型",
+  high: "高端型",
+}
+
+const TRAVEL_STYLE_LABEL: Record<string, string> = {
+  relaxed: "休闲放松",
+  adventure: "探险刺激",
+  cultural: "文化体验",
+  food: "美食之旅",
+  photography: "摄影采风",
+}
+
+function resolveBudgetLevel(value: number): BudgetLevelKey {
+  if (value <= 1500) return "low"
+  if (value <= 3000) return "medium"
+  if (value <= 5000) return "medium_high"
+  return "high"
+}
+
 export default function PlanningPage() {
-  /**
-   * 预算状态 - 用户设定的旅行预算范围
-   * @type {number[]} Slider组件要求的数组格式，[3000]表示默认3000元
-   */
   const [budget, setBudget] = useState([3000])
-  
-  /**
-   * 旅行天数状态 - 用户选择的行程总天数
-   * @type {number[]} Slider组件格式，[3]表示默认3天
-   */
   const [duration, setDuration] = useState([3])
+  const [destination, setDestination] = useState(DEFAULT_CITY)
+  const [travelStyle, setTravelStyle] = useState<string | undefined>()
+  const [selectedInterests, setSelectedInterests] = useState<string[]>([])
+  const [startDate, setStartDate] = useState("")
+  const [endDate, setEndDate] = useState("")
+  const [weatherAdaptive, setWeatherAdaptive] = useState(true)
+  const [avoidCrowd, setAvoidCrowd] = useState(true)
+  const [trafficOptimization, setTrafficOptimization] = useState(true)
+
+  const [datasetSummary, setDatasetSummary] = useState<ShanghaiDatasetSummary | null>(null)
+  const [plan, setPlan] = useState<ShanghaiRecommendationResponse | null>(null)
+  const [activeTab, setActiveTab] = useState<string>("day1")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    agentApi
+      .getShanghaiDataset()
+      .then((data) => setDatasetSummary(data))
+      .catch((err) => {
+        console.error(err)
+        setError("上海旅游数据预览获取失败，稍后重试或直接生成方案。")
+      })
+  }, [])
+
+  const budgetLevel = useMemo(() => resolveBudgetLevel(budget[0]), [budget])
+
+  useEffect(() => {
+    if (plan?.itinerary?.length) {
+      setActiveTab(`day${plan.itinerary[0].day}`)
+    }
+  }, [plan])
+
+  const handleInterestToggle = (tag: string) => {
+    setSelectedInterests((prev) =>
+      prev.includes(tag) ? prev.filter((item) => item !== tag) : [...prev, tag],
+    )
+  }
+
+  const handleGeneratePlan = async (event?: React.FormEvent) => {
+    event?.preventDefault()
+    setLoading(true)
+    setError(null)
+
+    const payload: ShanghaiRecommendationPayload = {
+      city: destination || DEFAULT_CITY,
+      travel_days: duration[0],
+      budget: budget[0],
+      budget_level: budgetLevel,
+      travel_style: travelStyle,
+      interests: selectedInterests,
+      start_date: startDate || undefined,
+      end_date: endDate || undefined,
+      weather_adaptive: weatherAdaptive,
+      avoid_crowd: avoidCrowd,
+      traffic_optimization: trafficOptimization,
+    }
+
+    try {
+      const response = await agentApi.getShanghaiRecommendations(payload)
+      setPlan(response)
+    } catch (err: any) {
+      console.error(err)
+      setError(err?.message || "生成智能方案失败，请稍后再试。")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const weatherHighlight =
+    plan?.analytics.weather_advice?.[0] ??
+    datasetSummary?.seasonal_notes?.spring ??
+    "等待生成，稍后将给出天气与出行建议"
+  const crowdHighlight = plan?.analytics.crowd_strategy ?? "生成方案后将智能避开人流高峰"
+  const trafficHighlight = plan?.analytics.traffic_tip ?? "开启交通优化后，将给出更顺畅的出行建议"
+  const indoorRatio =
+    plan?.analytics.indoor_ratio !== undefined ? `${Math.round(plan.analytics.indoor_ratio * 100)}%` : "—"
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header - 顶部导航栏 */}
       <header className="border-b bg-white sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            {/* 品牌标识 */}
             <div className="flex items-center space-x-2">
               <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-green-500 rounded-lg flex items-center justify-center">
                 <MapPin className="w-5 h-5 text-white" />
@@ -88,8 +195,6 @@ export default function PlanningPage() {
                 知旅
               </span>
             </div>
-            
-            {/* 导航菜单 - 突出当前页面 */}
             <nav className="hidden md:flex items-center space-x-6">
               <a href="/" className="text-gray-600 hover:text-blue-600 transition-colors">
                 首页
@@ -104,8 +209,6 @@ export default function PlanningPage() {
                 社区
               </a>
             </nav>
-            
-            {/* 我的行程入口 */}
             <Button variant="outline">我的行程</Button>
           </div>
         </div>
@@ -113,7 +216,6 @@ export default function PlanningPage() {
 
       <div className="container mx-auto px-4 py-8">
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Planning Form - 左侧规划设置表单 */}
           <div className="lg:col-span-1">
             <Card>
               <CardHeader>
@@ -121,292 +223,369 @@ export default function PlanningPage() {
                   <Settings className="w-5 h-5" />
                   规划设置
                 </CardTitle>
-                <CardDescription>告诉我们您的偏好，我们为您量身定制旅行方案</CardDescription>
+                <CardDescription>锁定上海，提前预留数据接口，快速生成智能行程。</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Destination - 目的地输入 */}
-                <div className="space-y-2">
-                  <Label htmlFor="destination">目的地</Label>
-                  <Input id="destination" placeholder="输入城市或景点名称" />
-                </div>
-
-                {/* Date Range - 日期范围选择 */}
-                <div className="grid grid-cols-2 gap-4">
+              <CardContent>
+                <form className="space-y-6" onSubmit={handleGeneratePlan}>
                   <div className="space-y-2">
-                    <Label htmlFor="start-date">出发日期</Label>
-                    <Input id="start-date" type="date" />
+                    <Label htmlFor="destination">目的地</Label>
+                    <Input
+                      id="destination"
+                      value={destination}
+                      onChange={(event) => setDestination(event.target.value)}
+                      placeholder="当前预留为上海，可继续细化区域"
+                    />
                   </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="start-date">出发日期</Label>
+                      <Input
+                        id="start-date"
+                        type="date"
+                        value={startDate}
+                        onChange={(event) => setStartDate(event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="end-date">返回日期</Label>
+                      <Input
+                        id="end-date"
+                        type="date"
+                        value={endDate}
+                        onChange={(event) => setEndDate(event.target.value)}
+                      />
+                    </div>
+                  </div>
+
                   <div className="space-y-2">
-                    <Label htmlFor="end-date">返回日期</Label>
-                    <Input id="end-date" type="date" />
+                    <Label>旅行天数: {duration[0]} 天</Label>
+                    <Slider value={duration} onValueChange={setDuration} max={14} min={1} step={1} className="w-full" />
                   </div>
-                </div>
 
-                {/* Duration - 旅行天数滑块 */}
-                <div className="space-y-2">
-                  <Label>旅行天数: {duration[0]} 天</Label>
-                  {/* 滑块组件 - 1-14天范围选择 */}
-                  <Slider value={duration} onValueChange={setDuration} max={14} min={1} step={1} className="w-full" />
-                </div>
-
-                {/* Budget - 预算范围滑块 */}
-                <div className="space-y-2">
-                  <Label>预算范围: ¥{budget[0]}</Label>
-                  {/* 滑块组件 - 500-10000元范围选择 */}
-                  <Slider
-                    value={budget}
-                    onValueChange={setBudget}
-                    max={10000}
-                    min={500}
-                    step={100}
-                    className="w-full"
-                  />
-                </div>
-
-                {/* Travel Style - 旅行风格下拉选择 */}
-                <div className="space-y-2">
-                  <Label htmlFor="travel-style">旅行风格</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择您的旅行风格" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="relaxed">休闲放松</SelectItem>
-                      <SelectItem value="adventure">探险刺激</SelectItem>
-                      <SelectItem value="cultural">文化体验</SelectItem>
-                      <SelectItem value="food">美食之旅</SelectItem>
-                      <SelectItem value="photography">摄影采风</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Interests - 兴趣标签选择 */}
-                <div className="space-y-2">
-                  <Label>兴趣标签</Label>
-                  {/* 标签网格 - 支持多选兴趣点 */}
-                  <div className="flex flex-wrap gap-2">
-                    {["历史文化", "自然风光", "美食", "购物", "夜生活", "博物馆", "户外运动", "温泉"].map((tag) => (
-                      <Badge key={tag} variant="outline" className="cursor-pointer hover:bg-blue-50">
-                        {tag}
-                      </Badge>
-                    ))}
+                  <div className="space-y-2">
+                    <Label>
+                      预算范围: ¥{budget[0]}（{LEVEL_LABEL[budgetLevel]}）
+                    </Label>
+                    <Slider
+                      value={budget}
+                      onValueChange={setBudget}
+                      max={10000}
+                      min={500}
+                      step={100}
+                      className="w-full"
+                    />
                   </div>
-                </div>
 
-                {/* Real-time Options - 实时优化开关 */}
-                <div className="space-y-4">
-                  <Label>实时优化选项</Label>
-                  <div className="space-y-3">
-                    {/* 天气自适应开关 */}
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">天气自适应</span>
-                      <Switch defaultChecked />
-                    </div>
-                    {/* 避开拥挤景点开关 */}
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">避开拥挤景点</span>
-                      <Switch defaultChecked />
-                    </div>
-                    {/* 交通优化开关 */}
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">交通优化</span>
-                      <Switch defaultChecked />
+                  <div className="space-y-2">
+                    <Label htmlFor="travel-style">旅行风格</Label>
+                    <Select value={travelStyle} onValueChange={setTravelStyle}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="请选择" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="relaxed">休闲放松</SelectItem>
+                        <SelectItem value="adventure">探险刺激</SelectItem>
+                        <SelectItem value="cultural">文化体验</SelectItem>
+                        <SelectItem value="food">美食之旅</SelectItem>
+                        <SelectItem value="photography">摄影采风</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>兴趣标签</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {INTEREST_OPTIONS.map((tag) => {
+                        const active = selectedInterests.includes(tag)
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => handleInterestToggle(tag)}
+                            className="outline-none"
+                          >
+                            <Badge
+                              variant={active ? "default" : "outline"}
+                              className={cn(
+                                "cursor-pointer transition-colors",
+                                active ? "bg-blue-600 hover:bg-blue-700" : "hover:bg-blue-50",
+                              )}
+                            >
+                              {tag}
+                            </Badge>
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
-                </div>
 
-                {/* 生成方案按钮 - 触发AI规划算法 */}
-                <Button className="w-full" size="lg">
-                  生成智能方案
-                </Button>
+                  <div className="space-y-4">
+                    <Label>实时优化</Label>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm">天气自适应</span>
+                        <Switch checked={weatherAdaptive} onCheckedChange={setWeatherAdaptive} />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm">避开拥挤景点</span>
+                        <Switch checked={avoidCrowd} onCheckedChange={setAvoidCrowd} />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm">交通优化</span>
+                        <Switch checked={trafficOptimization} onCheckedChange={setTrafficOptimization} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {error && (
+                    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                      {error}
+                    </div>
+                  )}
+
+                  <Button className="w-full" size="lg" type="submit" disabled={loading}>
+                    {loading ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        正在生成...
+                      </span>
+                    ) : (
+                      "生成智能方案"
+                    )}
+                  </Button>
+                </form>
               </CardContent>
             </Card>
           </div>
 
-          {/* Results - 右侧结果展示区域 */}
-          <div className="lg:col-span-2">
-            <div className="space-y-6">
-              {/* Real-time Status - 实时状况监控卡片 */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-blue-500" />
-                    实时状况
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {/* 状况指标网格 */}
-                  <div className="grid md:grid-cols-3 gap-4">
-                    {/* 天气状况 */}
-                    <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg">
-                      <Cloud className="w-8 h-8 text-blue-500" />
-                      <div>
-                        <div className="font-medium">天气</div>
-                        <div className="text-sm text-gray-600">晴 22°C</div>
-                      </div>
+          <div className="lg:col-span-2 space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-blue-500" />
+                  实时状况洞察
+                </CardTitle>
+                <CardDescription>
+                  无论数据是否齐备，都提前为上海预留好天气、客流与交通的反馈结构。
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg">
+                    <Cloud className="w-8 h-8 text-blue-500" />
+                    <div>
+                      <div className="font-medium">天气建议</div>
+                      <div className="text-sm text-gray-600">{weatherHighlight}</div>
                     </div>
-                    {/* 客流状况 */}
-                    <div className="flex items-center gap-3 p-3 bg-green-50 rounded-lg">
-                      <Users className="w-8 h-8 text-green-500" />
-                      <div>
-                        <div className="font-medium">客流</div>
-                        <div className="text-sm text-gray-600">适中</div>
-                      </div>
+                  </div>
+                  <div className="flex items-center gap-3 p-3 bg-green-50 rounded-lg">
+                    <Users className="w-8 h-8 text-green-500" />
+                    <div>
+                      <div className="font-medium">人流策略</div>
+                      <div className="text-sm text-gray-600">{crowdHighlight}</div>
                     </div>
-                    {/* 交通状况 */}
-                    <div className="flex items-center gap-3 p-3 bg-purple-50 rounded-lg">
-                      <Navigation className="w-8 h-8 text-purple-500" />
-                      <div>
-                        <div className="font-medium">交通</div>
-                        <div className="text-sm text-gray-600">畅通</div>
+                  </div>
+                  <div className="flex items-center gap-3 p-3 bg-purple-50 rounded-lg">
+                    <Navigation className="w-8 h-8 text-purple-500" />
+                    <div>
+                      <div className="font-medium">交通提示</div>
+                      <div className="text-sm text-gray-600">{trafficHighlight}</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-dashed border-slate-200 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm text-slate-500">室内/室外平衡度</p>
+                      <p className="text-2xl font-semibold text-slate-800">{indoorRatio}</p>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm text-slate-500 mb-2">上海精选参考（占位数据）</p>
+                      <div className="flex flex-wrap gap-2">
+                        {(datasetSummary?.sample_pois ?? []).map((poi) => (
+                          <Badge key={poi.id} variant="outline">
+                            {poi.name}
+                          </Badge>
+                        ))}
+                        {!datasetSummary?.sample_pois?.length && (
+                          <span className="text-xs text-slate-400">
+                            数据集准备中，可先使用推荐算法生成方案。
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </CardContent>
+            </Card>
 
-              {/* Recommended Itinerary - 推荐行程主要展示区 */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Star className="w-5 h-5 text-yellow-500" />
-                    推荐行程
-                  </CardTitle>
-                  <CardDescription>基于您的偏好和实时数据生成的个性化方案</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {/* Tab组件 - 多日行程切换展示 */}
-                  <Tabs defaultValue="day1" className="w-full">
-                    {/* Tab导航 - 支持扩展更多天数 */}
-                    <TabsList className="grid w-full grid-cols-3">
-                      <TabsTrigger value="day1">第1天</TabsTrigger>
-                      <TabsTrigger value="day2">第2天</TabsTrigger>
-                      <TabsTrigger value="day3">第3天</TabsTrigger>
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Star className="w-5 h-5 text-yellow-500" />
+                  推荐行程
+                </CardTitle>
+                <CardDescription>结合用户画像与协同过滤得分生成的上海个性化行程。</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {plan?.itinerary?.length ? (
+                  <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                    <TabsList className="flex flex-wrap gap-2">
+                      {plan.itinerary.map((day) => (
+                        <TabsTrigger key={day.day} value={`day${day.day}`} className="flex-1 min-w-[100px]">
+                          第{day.day}天
+                        </TabsTrigger>
+                      ))}
                     </TabsList>
 
-                    {/* 第1天行程内容 */}
-                    <TabsContent value="day1" className="space-y-4 mt-4">
-                      <div className="space-y-4">
-                        {/* 天安门广场行程项 */}
-                        <div className="flex items-start gap-4 p-4 border rounded-lg">
-                          {/* 时间图标 */}
-                          <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                            <Clock className="w-6 h-6 text-blue-600" />
-                          </div>
-                          <div className="flex-1">
-                            {/* 景点名称和时间 */}
-                            <div className="flex items-center justify-between mb-2">
-                              <h3 className="font-medium">天安门广场</h3>
-                              <Badge variant="secondary">09:00-11:00</Badge>
+                    {plan.itinerary.map((day) => (
+                      <TabsContent key={day.day} value={`day${day.day}`} className="space-y-4 mt-4">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                          <div className="flex flex-wrap items-center justify-between">
+                            <div>
+                              <span className="font-medium text-slate-800">
+                                {day.focus || "主题：城市探索"}
+                              </span>
+                              {day.date && <span className="ml-2 text-xs text-slate-500">日期：{day.date}</span>}
                             </div>
-                            {/* 景点描述 */}
-                            <p className="text-sm text-gray-600 mb-2">参观天安门广场，感受首都的庄严与历史厚重感</p>
-                            {/* 实时状态标签 */}
-                            <div className="flex items-center gap-2 text-xs text-gray-500">
-                              <Badge variant="outline" className="text-green-600">
-                                客流适中
-                              </Badge>
-                              <Badge variant="outline" className="text-blue-600">
-                                天气适宜
-                              </Badge>
-                            </div>
+                            {day.weather_note && (
+                              <span className="text-xs text-blue-600">{day.weather_note}</span>
+                            )}
                           </div>
                         </div>
 
-                        {/* 故宫博物院行程项 */}
-                        <div className="flex items-start gap-4 p-4 border rounded-lg">
-                          <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                            <MapPin className="w-6 h-6 text-green-600" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between mb-2">
-                              <h3 className="font-medium">故宫博物院</h3>
-                              <Badge variant="secondary">11:30-15:30</Badge>
+                        {day.spots.map((spot) => (
+                          <div key={spot.id} className="flex items-start gap-4 p-4 border rounded-lg bg-white">
+                            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <Clock className="w-6 h-6 text-blue-600" />
                             </div>
-                            <p className="text-sm text-gray-600 mb-2">深度游览紫禁城，探索明清两代皇家宫殿的建筑艺术</p>
-                            <div className="flex items-center gap-2 text-xs text-gray-500">
-                              <Badge variant="outline" className="text-green-600">
-                                客流较少
-                              </Badge>
-                              <Badge variant="outline" className="text-blue-600">
-                                推荐时段
-                              </Badge>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* 王府井步行街行程项 */}
-                        <div className="flex items-start gap-4 p-4 border rounded-lg">
-                          <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                            <Star className="w-6 h-6 text-orange-600" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between mb-2">
-                              <h3 className="font-medium">王府井步行街</h3>
-                              <Badge variant="secondary">16:00-19:00</Badge>
-                            </div>
-                            <p className="text-sm text-gray-600 mb-2">品尝北京小吃，购买特色纪念品，体验老北京文化</p>
-                            <div className="flex items-center gap-2 text-xs text-gray-500">
-                              <Badge variant="outline" className="text-yellow-600">
-                                美食推荐
-                              </Badge>
-                              <Badge variant="outline" className="text-purple-600">
-                                购物
-                              </Badge>
+                            <div className="flex-1 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <h3 className="font-medium text-slate-800">{spot.name}</h3>
+                                <Badge variant="secondary">{spot.schedule}</Badge>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                <Badge variant="outline">匹配度 {spot.score}</Badge>
+                                <Badge variant="outline">{spot.district}</Badge>
+                                {spot.price_level && <Badge variant="outline">消费 {spot.price_level}</Badge>}
+                                {spot.crowd_level && <Badge variant="outline">客流 {spot.crowd_level}</Badge>}
+                                <Badge variant="outline">{spot.indoor ? "室内" : "户外"}</Badge>
+                              </div>
+                              <div className="space-y-1">
+                                {spot.reasons.slice(0, 3).map((reason, index) => (
+                                  <p key={index} className="text-sm text-slate-600 leading-snug">
+                                    • {reason}
+                                  </p>
+                                ))}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </div>
-                    </TabsContent>
-
-                    {/* 第2天和第3天占位内容 */}
-                    <TabsContent value="day2" className="space-y-4 mt-4">
-                      <div className="text-center py-8 text-gray-500">第2天行程规划中...</div>
-                    </TabsContent>
-
-                    <TabsContent value="day3" className="space-y-4 mt-4">
-                      <div className="text-center py-8 text-gray-500">第3天行程规划中...</div>
-                    </TabsContent>
+                        ))}
+                      </TabsContent>
+                    ))}
                   </Tabs>
-                </CardContent>
-              </Card>
-
-              {/* Alternative Suggestions - 备选方案推荐 */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Plus className="w-5 h-5 text-green-500" />
-                    备选方案
-                  </CardTitle>
-                  <CardDescription>根据实时情况的其他推荐</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {/* 备选建议列表 */}
-                  <div className="space-y-3">
-                    {/* 颐和园替换方案 */}
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div>
-                        <div className="font-medium">颐和园</div>
-                        <div className="text-sm text-gray-600">如果故宫客流过多，推荐游览颐和园</div>
-                      </div>
-                      <Button variant="outline" size="sm">
-                        替换
-                      </Button>
-                    </div>
-                    {/* 室内博物馆替换方案 */}
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div>
-                        <div className="font-medium">室内博物馆</div>
-                        <div className="text-sm text-gray-600">如果天气转雨，推荐国家博物馆</div>
-                      </div>
-                      <Button variant="outline" size="sm">
-                        替换
-                      </Button>
-                    </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-200 py-12 text-center text-slate-500">
+                    尚未生成行程，请填写左侧偏好并点击“生成智能方案”。
                   </div>
-                </CardContent>
-              </Card>
-            </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="w-5 h-5 text-emerald-500" />
+                  用户画像洞察
+                </CardTitle>
+                <CardDescription>根据旅行风格、预算与兴趣自动绘制的标签画像。</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {plan ? (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500">预算定位</p>
+                        <p className="text-sm font-medium text-slate-800">
+                          {plan.user_profile.budget_level.label ?? LEVEL_LABEL[plan.user_profile.budget_level.key]}
+                        </p>
+                        {plan.user_profile.budget_level.range && (
+                          <p className="text-xs text-slate-500">{plan.user_profile.budget_level.range}</p>
+                        )}
+                      </div>
+                      <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500">旅行风格</p>
+                        <p className="text-sm font-medium text-slate-800">
+                          {plan.user_profile.travel_style
+                            ? TRAVEL_STYLE_LABEL[plan.user_profile.travel_style] ?? plan.user_profile.travel_style
+                            : "未指定"}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {plan.user_profile.preferences.weather_adaptive ? "天气自适应·" : ""}
+                          {plan.user_profile.preferences.avoid_crowd ? "避开人群·" : ""}
+                          {plan.user_profile.preferences.traffic_optimization ? "交通优化" : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500 mb-2">核心画像标签</p>
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(plan.user_profile.tags)
+                          .slice(0, 8)
+                          .map(([tag, weight]) => (
+                            <Badge key={tag} variant="outline" className="bg-slate-50">
+                              {tag} {Math.round(weight * 100)}%
+                            </Badge>
+                          ))}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    生成方案后，会自动呈现用户画像标签，方便后续个性化调整。
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Plus className="w-5 h-5 text-green-500" />
+                  备选方案
+                </CardTitle>
+                <CardDescription>
+                  为天气、人流或预算变化预留的备用景点，可随时替换。
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {plan?.backup_options?.length ? (
+                  <div className="space-y-3">
+                    {plan.backup_options.map((option) => (
+                      <div key={option.id} className="flex items-start justify-between gap-3 p-3 border rounded-lg">
+                        <div>
+                          <div className="font-medium text-slate-800">{option.name}</div>
+                          <div className="text-xs text-slate-500 mb-1">
+                            {option.district} · {option.category}
+                          </div>
+                          {option.reason.slice(0, 2).map((reason, index) => (
+                            <p key={index} className="text-xs text-slate-500">
+                              • {reason}
+                            </p>
+                          ))}
+                        </div>
+                        <Badge variant="secondary">匹配度 {option.score}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-200 py-10 text-center text-sm text-slate-500">
+                    智能备选将在生成主行程后自动提供，也可以后续接入更丰富的上海数据集。
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </div>
       </div>

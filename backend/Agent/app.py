@@ -13,6 +13,7 @@ import json
 import time
 from datetime import datetime
 import sys
+import logging
 
 # 添加当前目录到Python路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -28,6 +29,12 @@ except ImportError as e:
     TravelAgentService = None
     TravelPreference = None
 
+try:
+    from recommand import RecommendationPlanner
+except ImportError as e:
+    print(f"Warning: Could not import recommand module: {e}")
+    RecommendationPlanner = None
+
 from config import Config
 
 # 创建Flask应用
@@ -35,12 +42,15 @@ app = Flask(__name__)
 app.config.from_object(Config)
 app.json.ensure_ascii = False
 
+logger = logging.getLogger(__name__)
+
 # 启用CORS
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # 全局变量存储计划和服务实例
 travel_plans = {}
 agent_service = None
+planner_service = None
 
 # 初始化服务
 if TravelAgentService:
@@ -53,6 +63,16 @@ if TravelAgentService:
 else:
     print("EnhancedTravelAgent not available, using mock responses")
     agent_service = None
+
+if RecommendationPlanner:
+    try:
+        planner_service = RecommendationPlanner()
+        print("RecommendationPlanner initialized successfully")
+    except Exception as e:
+        print(f"Failed to initialize RecommendationPlanner: {e}")
+        planner_service = None
+else:
+    print("RecommendationPlanner not available, skip initialization")
 
 # API路由前缀
 API_PREFIX = '/api/v1'
@@ -580,6 +600,52 @@ def get_crowd_info():
         return jsonify({
             'status': 'error',
             'message': str(e)
+        }), 500
+
+
+@app.route(f'{API_PREFIX}/shanghai/dataset', methods=['GET'])
+def get_shanghai_dataset():
+    """获取上海旅游数据占位信息"""
+    if not planner_service:
+        return jsonify({
+            'status': 'error',
+            'message': '推荐引擎未就绪，无法提供数据预览',
+            'errorCode': 'PLANNER_UNAVAILABLE'
+        }), 503
+
+    dataset = planner_service.get_dataset_summary()
+    return jsonify({
+        'status': 'success',
+        'data': dataset
+    })
+
+
+@app.route(f'{API_PREFIX}/shanghai/recommendations', methods=['POST'])
+def create_shanghai_recommendations():
+    """生成基于上海数据的智能推荐行程"""
+    if not planner_service:
+        return jsonify({
+            'status': 'error',
+            'message': '推荐引擎未就绪，请稍后重试',
+            'errorCode': 'PLANNER_UNAVAILABLE'
+        }), 503
+
+    try:
+        payload = request.get_json() or {}
+    except Exception:
+        payload = {}
+
+    try:
+        result = planner_service.generate_plan(payload)
+        return jsonify({
+            'status': 'success',
+            'data': result
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'生成推荐方案失败: {str(e)}',
+            'errorCode': 'PLANNER_ERROR'
         }), 500
 
 @app.errorhandler(404)
