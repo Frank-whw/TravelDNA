@@ -11,11 +11,38 @@ from app.utils import find_matches, init_default_data
 api_bp = Blueprint('api', __name__)
 
 # 初始化默认数据
-@api_bp.route('/init-data', methods=['GET'])
+@api_bp.route('/init-data', methods=['GET', 'POST'])
 def initialize_data():
     try:
         init_default_data()
         return jsonify({"status": "success", "message": "默认数据初始化成功"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@api_bp.route('/init-users', methods=['POST'])
+def init_users():
+    from random_user import seed_mock_data
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        stats = seed_mock_data(
+            users=int(payload.get("users") or payload.get("count") or 200),
+            teams=int(payload.get("teams") or 60),
+            min_members=int(payload.get("minMembers") or payload.get("min_members") or 3),
+            max_members=int(payload.get("maxMembers") or payload.get("max_members") or 8),
+            messages_per_team=int(payload.get("messagesPerTeam") or payload.get("messages_per_team") or 25),
+            matches_per_user=int(payload.get("matchesPerUser") or payload.get("matches_per_user") or 10),
+            min_match_score=int(payload.get("minMatchScore") or payload.get("min_match_score") or 60),
+            purge=bool(payload.get("purge", False)),
+        )
+        # 将 top_cities 列表转换为可序列化格式
+        if "top_cities" in stats:
+            stats["top_cities"] = [
+                {"city": city, "count": count} for city, count in stats["top_cities"]
+            ]
+        return jsonify({"status": "success", "message": "测试用户生成完成", "data": stats})
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500

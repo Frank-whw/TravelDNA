@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from .collaborative import normalize_scores, score_candidate
+from .collaborative import cosine_similarity, normalize_scores, score_candidate
 from .data import DEFAULT_CITY_SUMMARY, SHANGHAI_POIS
 from .profiles import BUDGET_LEVELS, UserPersona, build_user_persona
 from .services import realtime_service
@@ -530,19 +530,38 @@ class RecommendationPlanner:
             poi_price = poi.get("price_level", "medium")
             budget_penalty = _budget_penalty(request.budget_level, poi_price)
 
-            score = score_candidate(
-                persona.tags,
-                poi.get("tags", {}),
-                crowd_penalty=crowd_penalty,
-                weather_penalty=weather_penalty,
-                budget_penalty=budget_penalty,
+            base_similarity = cosine_similarity(persona.tags, poi.get("tags", {}))
+            base_score = round(base_similarity * 100, 2)
+            final_score = round(
+                score_candidate(
+                    persona.tags,
+                    poi.get("tags", {}),
+                    crowd_penalty=crowd_penalty,
+                    weather_penalty=weather_penalty,
+                    budget_penalty=budget_penalty,
+                ),
+                2,
             )
+
+            score = final_score
             scores.append((poi["id"], score))
+            total_penalty = round(
+                max(base_score - final_score, 0.0), 2
+            )
+
             details[poi["id"]] = {
                 "poi": poi,
-                "crowd_penalty": crowd_penalty,
-                "weather_penalty": weather_penalty,
-                "budget_penalty": budget_penalty,
+                "crowd_penalty": round(crowd_penalty, 2),
+                "weather_penalty": round(weather_penalty, 2),
+                "budget_penalty": round(budget_penalty, 2),
+                "base_score": base_score,
+                "raw_score": final_score,
+                "penalty_breakdown": {
+                    "total": total_penalty,
+                    "crowd": round(crowd_penalty, 2),
+                    "weather": round(weather_penalty, 2),
+                    "budget": round(budget_penalty, 2),
+                },
             }
 
         normalized = normalize_scores(scores)
@@ -550,6 +569,49 @@ class RecommendationPlanner:
             details[poi_id]["score"] = score
 
         return details
+
+
+def _describe_penalties(breakdown: Dict[str, float]) -> Optional[str]:
+    segments = []
+    if breakdown.get("weather", 0) > 0:
+        segments.append(f"天气扣 {breakdown['weather']} 分")
+    if breakdown.get("crowd", 0) > 0:
+        segments.append(f"人流扣 {breakdown['crowd']} 分")
+    if breakdown.get("budget", 0) > 0:
+        segments.append(f"预算扣 {breakdown['budget']} 分")
+    if not segments and breakdown.get("total", 0) == 0:
+        return None
+    if not segments and breakdown.get("total", 0) > 0:
+        segments.append(f"其他因素扣 {breakdown['total']} 分")
+    return "，".join(segments)
+
+
+def _build_reasoning(poi: Dict[str, Any], candidate: Dict[str, Any]) -> List[str]:
+    reasons: List[str] = []
+    breakdown = candidate.get("penalty_breakdown")
+    base_score = candidate.get("base_score")
+    raw_score = candidate.get("raw_score")
+    normalized_score = candidate.get("score")
+
+    if base_score is not None:
+        reasons.append(f"基础偏好匹配 {base_score} 分")
+    penalty_text = _describe_penalties(breakdown or {})
+    if penalty_text:
+        total_penalty = breakdown.get("total", 0) if breakdown else 0
+        reasons.append(f"{penalty_text}，合计扣 {total_penalty} 分")
+    if raw_score is not None:
+        if normalized_score is not None:
+            reasons.append(f"综合得分 {raw_score} 分（归一化 {normalized_score}）")
+        else:
+            reasons.append(f"综合得分 {raw_score} 分")
+
+    if poi.get("description"):
+        reasons.append(poi["description"])
+
+    if candidate.get("crowd_penalty", 0) > 0:
+        reasons.append("建议提前预约或错峰前往，当前人流较高")
+
+    return reasons
 
     def _build_itinerary(
         self, request: RecommendationRequest, scored_candidates: Dict[str, Dict[str, Any]]
@@ -679,20 +741,6 @@ class RecommendationPlanner:
             "crowd_strategy": "已自动优先选择人流适中或低的景点" if request.avoid_crowd else "未特别规避人流峰值",
             "traffic_tip": "建议优先选择地铁与步行衔接，避开核心商圈晚高峰" if request.traffic_optimization else "可根据偏好自定义交通方式",
         }
-
-
-def _build_reasoning(poi: Dict[str, Any], candidate: Dict[str, Any]) -> List[str]:
-    reasons = []
-    score = candidate.get("score")
-    if score is not None:
-        reasons.append(f"偏好匹配度 {score}/100")
-    if poi.get("description"):
-        reasons.append(poi["description"])
-    if candidate.get("crowd_penalty", 0) > 0:
-        reasons.append("建议提前预约或错峰前往，当前人流较高")
-    return reasons
-
-
 def _recommend_schedule(position: int) -> str:
     slots = ["09:00-11:30", "13:00-15:30", "16:00-19:00", "19:30-21:30"]
     return slots[position % len(slots)]
