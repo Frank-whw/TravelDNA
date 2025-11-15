@@ -570,49 +570,6 @@ class RecommendationPlanner:
 
         return details
 
-
-def _describe_penalties(breakdown: Dict[str, float]) -> Optional[str]:
-    segments = []
-    if breakdown.get("weather", 0) > 0:
-        segments.append(f"天气扣 {breakdown['weather']} 分")
-    if breakdown.get("crowd", 0) > 0:
-        segments.append(f"人流扣 {breakdown['crowd']} 分")
-    if breakdown.get("budget", 0) > 0:
-        segments.append(f"预算扣 {breakdown['budget']} 分")
-    if not segments and breakdown.get("total", 0) == 0:
-        return None
-    if not segments and breakdown.get("total", 0) > 0:
-        segments.append(f"其他因素扣 {breakdown['total']} 分")
-    return "，".join(segments)
-
-
-def _build_reasoning(poi: Dict[str, Any], candidate: Dict[str, Any]) -> List[str]:
-    reasons: List[str] = []
-    breakdown = candidate.get("penalty_breakdown")
-    base_score = candidate.get("base_score")
-    raw_score = candidate.get("raw_score")
-    normalized_score = candidate.get("score")
-
-    if base_score is not None:
-        reasons.append(f"基础偏好匹配 {base_score} 分")
-    penalty_text = _describe_penalties(breakdown or {})
-    if penalty_text:
-        total_penalty = breakdown.get("total", 0) if breakdown else 0
-        reasons.append(f"{penalty_text}，合计扣 {total_penalty} 分")
-    if raw_score is not None:
-        if normalized_score is not None:
-            reasons.append(f"综合得分 {raw_score} 分（归一化 {normalized_score}）")
-        else:
-            reasons.append(f"综合得分 {raw_score} 分")
-
-    if poi.get("description"):
-        reasons.append(poi["description"])
-
-    if candidate.get("crowd_penalty", 0) > 0:
-        reasons.append("建议提前预约或错峰前往，当前人流较高")
-
-    return reasons
-
     def _build_itinerary(
         self, request: RecommendationRequest, scored_candidates: Dict[str, Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -647,13 +604,13 @@ def _build_reasoning(poi: Dict[str, Any], candidate: Dict[str, Any]) -> List[str
                         "id": poi["id"],
                         "name": poi["name"],
                         "district": poi["district"],
-                        "category": poi["category"],
+                        "category": poi.get("category", ""),
                         "score": candidate["score"],
                         "schedule": _recommend_schedule(len(day_plan["spots"])),
                         "reasons": _build_reasoning(poi, candidate),
                         "price_level": poi.get("price_level"),
                         "crowd_level": poi.get("crowd_level"),
-                        "duration_hours": poi.get("duration_hours"),
+                        "duration_hours": poi.get("duration_hours", 2.0),
                         "indoor": poi.get("indoor", False),
                     }
                 )
@@ -684,7 +641,7 @@ def _build_reasoning(poi: Dict[str, Any], candidate: Dict[str, Any]) -> List[str
                     "id": poi["id"],
                     "name": poi["name"],
                     "district": poi["district"],
-                    "category": poi["category"],
+                    "category": poi.get("category", ""),
                     "score": item["score"],
                     "reason": _build_reasoning(poi, item)[:2],
                 }
@@ -741,6 +698,51 @@ def _build_reasoning(poi: Dict[str, Any], candidate: Dict[str, Any]) -> List[str
             "crowd_strategy": "已自动优先选择人流适中或低的景点" if request.avoid_crowd else "未特别规避人流峰值",
             "traffic_tip": "建议优先选择地铁与步行衔接，避开核心商圈晚高峰" if request.traffic_optimization else "可根据偏好自定义交通方式",
         }
+
+
+def _describe_penalties(breakdown: Dict[str, float]) -> Optional[str]:
+    segments = []
+    if breakdown.get("weather", 0) > 0:
+        segments.append(f"天气扣 {breakdown['weather']} 分")
+    if breakdown.get("crowd", 0) > 0:
+        segments.append(f"人流扣 {breakdown['crowd']} 分")
+    if breakdown.get("budget", 0) > 0:
+        segments.append(f"预算扣 {breakdown['budget']} 分")
+    if not segments and breakdown.get("total", 0) == 0:
+        return None
+    if not segments and breakdown.get("total", 0) > 0:
+        segments.append(f"其他因素扣 {breakdown['total']} 分")
+    return "，".join(segments)
+
+
+def _build_reasoning(poi: Dict[str, Any], candidate: Dict[str, Any]) -> List[str]:
+    reasons: List[str] = []
+    breakdown = candidate.get("penalty_breakdown")
+    base_score = candidate.get("base_score")
+    raw_score = candidate.get("raw_score")
+    normalized_score = candidate.get("score")
+
+    if base_score is not None:
+        reasons.append(f"基础偏好匹配 {base_score} 分")
+    penalty_text = _describe_penalties(breakdown or {})
+    if penalty_text:
+        total_penalty = breakdown.get("total", 0) if breakdown else 0
+        reasons.append(f"{penalty_text}，合计扣 {total_penalty} 分")
+    if raw_score is not None:
+        if normalized_score is not None:
+            reasons.append(f"综合得分 {raw_score} 分（归一化 {normalized_score}）")
+        else:
+            reasons.append(f"综合得分 {raw_score} 分")
+
+    if poi.get("description"):
+        reasons.append(poi["description"])
+
+    if candidate.get("crowd_penalty", 0) > 0:
+        reasons.append("建议提前预约或错峰前往，当前人流较高")
+
+    return reasons
+
+
 def _recommend_schedule(position: int) -> str:
     slots = ["09:00-11:30", "13:00-15:30", "16:00-19:00", "19:30-21:30"]
     return slots[position % len(slots)]

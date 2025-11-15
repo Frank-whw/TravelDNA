@@ -101,6 +101,14 @@ def chat():
         
         user_message = data['message']
         context = data.get('context', {})
+        tags = data.get('tags', [])  # 支持标签输入
+        is_feedback = data.get('is_feedback', False)  # 是否为反馈请求
+        plan_id = data.get('plan_id')  # 方案ID（用于反馈迭代）
+        
+        # 如果提供了标签，将其合并到用户消息中
+        if tags:
+            tag_text = ' '.join([f'#{tag}' for tag in tags])
+            user_message = f"{user_message} {tag_text}"
         
         # 使用增强版Agent处理请求
         if agent_service:
@@ -114,21 +122,52 @@ def chat():
                 )
                 
                 if isinstance(result, dict):
-                    response = result['response']
+                    response = result.get('response', '')
                     thoughts = result.get('thoughts', [])
                     extracted_info = result.get('extracted_info', {})
+                    user_profile = result.get('extracted_info', {}).get('user_profile', {})
+                    status = result.get('status', '')  # 获取状态
+                    
+                    # 如果是思考阶段，立即返回
+                    if status == "thinking":
+                        ai_response = {
+                            'message': response or "正在分析你的需求...",
+                            'suggestions': [],
+                            'type': 'text',
+                            'timestamp': datetime.now().isoformat(),
+                            'thoughts': thoughts,
+                            'extracted_info': extracted_info,
+                            'user_profile': user_profile,
+                            'agent_name': '知小旅',
+                            'status': 'thinking'
+                        }
+                        return jsonify({
+                            'status': 'success',
+                            'data': ai_response
+                        })
                 else:
                     response = result
                     thoughts = []
                     extracted_info = {}
+                    user_profile = {}
+                    status = ''
                 
-                suggestions = ["制定旅游计划", "查询景点信息", "天气查询", "路线规划"]
+                # 生成反馈引导建议
+                if not is_feedback:
+                    suggestions = [
+                        "这份行程是否符合你的预期？",
+                        "满意，开始规划",
+                        "不满意，需要调整"
+                    ]
+                else:
+                    suggestions = ["继续优化", "满意，保存方案", "重新规划"]
             except Exception as e:
                 print(f"增强版Agent处理失败: {e}")
                 # 降级到基础回复逻辑
                 response = f"我理解您的需求，正在为您规划旅游攻略。由于系统繁忙，请稍后再试或重新描述您的需求。"
                 thoughts = []
                 extracted_info = {}
+                user_profile = {}  # 初始化用户画像
                 suggestions = ["制定旅游计划", "查询景点信息", "天气查询"]
         else:
             # 基础智能回复逻辑（当Agent不可用时）
@@ -148,12 +187,13 @@ def chat():
                 response = "我可以根据您的兴趣推荐合适的景点！上海有外滩、东方明珠、豫园、南京路等著名景点。您偏好哪种类型的景点呢？"
                 suggestions = ["历史文化景点", "现代建筑景观", "购物娱乐区域", "自然风光"]
             else:
-                response = f"我理解您想了解\"{user_message}\"。作为您的智能旅游助手，我可以为您提供：\n\n🗺️ 个性化旅游规划\n🌤️ 实时天气信息\n🍜 美食景点推荐\n📊 人流量预测\n\n请告诉我您的具体需求，我会为您提供最专业的建议！"
+                response = f"你好！我是「知小旅」，你的智能旅游规划助手～\n\n我理解你想了解\"{user_message}\"。我可以为你提供：\n\n🗺️ 个性化旅游规划\n🌤️ 实时天气信息\n🍜 美食景点推荐\n📊 人流量预测\n\n请告诉我你的具体需求，我会为你提供最贴心的建议！"
                 suggestions = ["制定旅游计划", "查询景点信息", "天气查询"]
             
             # 基础回复时没有思考过程
             thoughts = []
             extracted_info = {}
+            user_profile = {}  # 初始化用户画像
         
         ai_response = {
             'message': response,
@@ -161,7 +201,9 @@ def chat():
             'type': 'text',
             'timestamp': datetime.now().isoformat(),
             'thoughts': thoughts,
-            'extracted_info': extracted_info
+            'extracted_info': extracted_info,
+            'user_profile': user_profile,  # 添加用户画像
+            'agent_name': '知小旅'  # 标识Agent名称
         }
         
         return jsonify({
@@ -476,6 +518,153 @@ def adjust_travel_plan(plan_id):
             'message': '计划已成功调整'
         })
     
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route(f'{API_PREFIX}/chat/feedback', methods=['POST'])
+def handle_feedback():
+    """处理用户反馈并迭代优化方案"""
+    try:
+        data = request.get_json()
+        if not data or 'feedback' not in data:
+            return jsonify({
+                'status': 'error',
+                'message': '请提供反馈内容',
+                'errorCode': 'MISSING_FEEDBACK'
+            }), 400
+        
+        feedback = data['feedback']
+        plan_id = data.get('plan_id')
+        user_id = data.get('user_id', 'default')
+        original_plan = data.get('original_plan')
+        
+        if not agent_service:
+            return jsonify({
+                'status': 'error',
+                'message': 'Agent服务不可用'
+            }), 503
+        
+        # 获取或创建用户上下文
+        if user_id not in agent_service.user_contexts:
+            # 如果用户上下文不存在，自动创建一个
+            from enhanced_travel_agent import UserContext, TravelPreference
+            agent_service.user_contexts[user_id] = UserContext(
+                user_id=user_id,
+                conversation_history=[],
+                travel_preferences=TravelPreference()
+            )
+            print(f"为反馈请求自动创建用户上下文: {user_id}")
+        
+        context = agent_service.user_contexts[user_id]
+        
+        # 检查迭代次数（最多3次）
+        if context.iteration_count >= 3:
+            return jsonify({
+                'status': 'error',
+                'message': '已达到最大迭代次数（3次），请重新规划',
+                'errorCode': 'MAX_ITERATIONS'
+            }), 400
+        
+        # 记录反馈
+        context.feedback_history.append({
+            'feedback': feedback,
+            'timestamp': datetime.now().isoformat(),
+            'iteration': context.iteration_count + 1
+        })
+        context.iteration_count += 1
+        
+        # 构建迭代优化请求
+        iteration_prompt = f"""用户对第一版方案给出了反馈，请根据反馈进行优化调整。
+
+原始方案：
+{original_plan if original_plan else '请参考之前的对话历史'}
+
+用户反馈：
+{feedback}
+
+迭代次数：{context.iteration_count}/3
+
+优化要求：
+1. 基于原方案微调（非重构），优先修改用户明确提及的点
+2. 同步更新关联内容（如调整景点后，自动更新交通方式和休息节点）
+3. 附"调整说明"（如"根据反馈，将下午步行路线缩短至500米，替换为地铁接驳"）
+4. 保持「知小旅」的亲和语气，说明调整原因
+
+请生成优化后的方案。"""
+        
+        # 调用Agent进行迭代优化
+        result = agent_service.process_user_request(
+            iteration_prompt,
+            user_id=user_id,
+            show_thoughts=False,
+            return_thoughts=True
+        )
+        
+        if isinstance(result, dict):
+            response = result['response']
+            thoughts = result.get('thoughts', [])
+            extracted_info = result.get('extracted_info', {})
+        else:
+            response = result
+            thoughts = []
+            extracted_info = {}
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'message': response,
+                'thoughts': thoughts,
+                'extracted_info': extracted_info,
+                'iteration_count': context.iteration_count,
+                'agent_name': '知小旅'
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'处理反馈时发生错误: {str(e)}',
+            'errorCode': 'FEEDBACK_ERROR'
+        }), 500
+
+@app.route(f'{API_PREFIX}/user/memory', methods=['GET'])
+def get_user_memory():
+    """获取用户记忆（偏好沉淀）"""
+    try:
+        user_id = request.args.get('user_id', 'default')
+        
+        if not agent_service:
+            return jsonify({
+                'status': 'error',
+                'message': 'Agent服务不可用'
+            }), 503
+        
+        if user_id not in agent_service.user_contexts:
+            # 如果用户上下文不存在，返回空记忆
+            return jsonify({
+                'status': 'success',
+                'data': {
+                    'stable_preferences': {},
+                    'recent_choices': [],
+                    'avoid_items': []
+                }
+            })
+        
+        context = agent_service.user_contexts[user_id]
+        memory = context.user_memory or {
+            'stable_preferences': {},
+            'recent_choices': [],
+            'avoid_items': []
+        }
+        
+        return jsonify({
+            'status': 'success',
+            'data': memory
+        })
+        
     except Exception as e:
         return jsonify({
             'status': 'error',

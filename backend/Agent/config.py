@@ -12,15 +12,23 @@ class Config:
     """系统配置类"""
     
     # ==================== AI模型配置 ====================
-    # 豆包API配置
+    # 豆包API配置（保留，作为备选）
     DOUBAO_API_KEY = os.getenv('DOUBAO_API_KEY', '')
     DOUBAO_API_BASE = "https://ark.cn-beijing.volces.com/api/v3"
     DOUBAO_MODEL = "doubao-1-5-pro-32k-250115"
+    
+    # DeepSeek API配置（主要使用）
+    DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '')
+    DEEPSEEK_API_BASE = "https://api.deepseek.com"
+    DEEPSEEK_MODEL = "deepseek-chat"  # 使用非思考模式，如需思考模式可使用 "deepseek-reasoner"
     
     # AI调用参数
     AI_TEMPERATURE = 0.7
     AI_MAX_TOKENS = 2000
     AI_TIMEOUT = 30
+    
+    # AI Provider选择：'deepseek' 或 'doubao'，默认使用deepseek
+    AI_PROVIDER = os.getenv('AI_PROVIDER', 'deepseek').lower()
     
     # ==================== MCP服务配置 ====================
     # MCP服务基础配置
@@ -111,6 +119,7 @@ class TestingConfig(Config):
 # API Keys字典
 API_KEYS = {
     "DOUBAO": os.getenv('DOUBAO_API_KEY', ''),
+    "DEEPSEEK": os.getenv('DEEPSEEK_API_KEY', ''),
     "AMAP_WEATHER": os.getenv("AMAP_WEATHER_API_KEY", ""),
     "AMAP_TRAFFIC": os.getenv("AMAP_TRAFFIC_API_KEY", ""),
     "AMAP_NAVIGATION": os.getenv("AMAP_NAVIGATION_API_KEY", ""),
@@ -183,6 +192,8 @@ if __name__ == "__main__":
     print("✅ 配置模块加载成功")
     print("\n📊 当前配置信息：")
     print(f"  环境: {os.getenv('FLASK_ENV', 'development')}")
+    print(f"  AI Provider: {Config.AI_PROVIDER}")
+    print(f"  DeepSeek API密钥: {'已配置' if API_KEYS['DEEPSEEK'] else '未配置'}")
     print(f"  豆包API密钥: {'已配置' if API_KEYS['DOUBAO'] else '未配置'}")
     print(f"  高德天气API: {'已配置' if API_KEYS['AMAP_WEATHER'] else '未配置'}")
     print(f"  高德交通API: {'已配置' if API_KEYS['AMAP_TRAFFIC'] else '未配置'}")

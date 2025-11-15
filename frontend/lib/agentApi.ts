@@ -227,7 +227,7 @@ class AgentApiService {
   /**
    * AI聊天对话
    */
-  async chat(message: string, context?: any): Promise<{ 
+  async chat(message: string, context?: any, tags?: string[]): Promise<{ 
     message: string; 
     suggestions?: string[]; 
     type?: string; 
@@ -240,14 +240,49 @@ class AgentApiService {
       icon: string;
     }>;
     extracted_info?: any;
+    user_profile?: any;
+    agent_name?: string;
   }> {
     return this.request('/chat', {
       method: 'POST',
       body: JSON.stringify({
         message,
         context,
+        tags: tags || [],
       }),
     });
+  }
+  
+  /**
+   * 提交反馈并迭代优化
+   */
+  async submitFeedback(feedback: string, planId?: string, userId?: string, originalPlan?: string): Promise<{
+    message: string;
+    thoughts?: any[];
+    extracted_info?: any;
+    iteration_count?: number;
+    agent_name?: string;
+  }> {
+    return this.request('/chat/feedback', {
+      method: 'POST',
+      body: JSON.stringify({
+        feedback,
+        plan_id: planId,
+        user_id: userId,
+        original_plan: originalPlan,
+      }),
+    });
+  }
+  
+  /**
+   * 获取用户记忆
+   */
+  async getUserMemory(userId: string): Promise<{
+    stable_preferences: Record<string, number>;
+    recent_choices: string[];
+    avoid_items: string[];
+  }> {
+    return this.request(`/user/memory?user_id=${userId}`);
   }
 
   /**

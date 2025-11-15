@@ -7,6 +7,7 @@
 
 import json
 import logging
+import os
 import re
 import requests
 import urllib3
@@ -18,11 +19,40 @@ from enum import Enum
 import pandas as pd
 from pathlib import Path
 from threading import Lock
+import jieba
+import jieba.analyse
 
 from config import (
     API_KEYS, AMAP_CONFIG, RAG_CONFIG, DEFAULT_CONFIG,
     get_api_key, get_config
 )
+
+# 导入新的模块化组件
+# 使用try-except处理相对导入和绝对导入两种情况
+try:
+    # 相对导入（作为包的一部分）
+    from .mcp import MCPServiceType, MCPClient, WeatherInfo, RouteInfo, POIInfo
+    from .rag import RAGClient, SearchMode
+    from .model.doubao_agent import DouBaoAgent
+    try:
+        from .model.deepseek_agent import DeepSeekAgent
+        DEEPSEEK_AVAILABLE = True
+    except ImportError:
+        DeepSeekAgent = None
+        DEEPSEEK_AVAILABLE = False
+    from .model.models import TravelPreference, ThoughtProcess, UserContext, WeatherCondition, TrafficCondition, CrowdLevel
+except ImportError:
+    # 绝对导入（直接作为模块导入）
+    from mcp import MCPServiceType, MCPClient, WeatherInfo, RouteInfo, POIInfo
+    from rag import RAGClient, SearchMode
+    from model.doubao_agent import DouBaoAgent
+    try:
+        from model.deepseek_agent import DeepSeekAgent
+        DEEPSEEK_AVAILABLE = True
+    except ImportError:
+        DeepSeekAgent = None
+        DEEPSEEK_AVAILABLE = False
+    from model.models import TravelPreference, ThoughtProcess, UserContext, WeatherCondition, TrafficCondition, CrowdLevel
 
 # 配置日志
 logging.basicConfig(
@@ -31,213 +61,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 枚举定义
-class WeatherCondition(Enum):
-    EXCELLENT = "excellent"
-    GOOD = "good"
-    MODERATE = "moderate"
-    POOR = "poor"
-    EXTREME = "extreme"
+# 注意：所有枚举和数据结构已移至模块化组件
+# - MCPServiceType, WeatherInfo, RouteInfo, POIInfo 从 .mcp 导入
+# - TravelPreference, ThoughtProcess, UserContext, WeatherCondition, TrafficCondition, CrowdLevel 从 .model.models 导入
+# - DouBaoAgent 从 .model.doubao_agent 导入
+# - DeepSeekAgent 从 .model.deepseek_agent 导入（如果可用）
 
-class TrafficCondition(Enum):
-    SMOOTH = "smooth"
-    SLOW = "slow"
-    CONGESTED = "congested"
-    BLOCKED = "blocked"
-
-class CrowdLevel(Enum):
-    LOW = "low"
-    MODERATE = "moderate"
-    HIGH = "high"
-    VERY_HIGH = "very_high"
-
-class MCPServiceType(Enum):
-    WEATHER = "weather"
-    NAVIGATION = "navigation"
-    TRAFFIC = "traffic"
-    POI = "poi"
-    CROWD = "crowd"
-
-# 数据结构定义
-@dataclass
-class WeatherInfo:
-    """天气信息数据结构"""
-    date: str
-    weather: str
-    temperature: str
-    wind: str
-    humidity: str
-    precipitation: str
-
-@dataclass
-class RouteInfo:
-    """路线信息数据结构"""
-    distance: str
-    duration: str
-    traffic_status: str
-    route_description: str
-    congestion_level: str
-
-@dataclass
-class POIInfo:
-    """POI信息数据结构"""
-    name: str
-    address: str
-    rating: float
-    business_hours: str
-    price: str
-    distance: str
-    category: str
-    reviews: List[str] = None
-
-@dataclass
-class TravelPreference:
-    """用户旅游偏好"""
-    weather_tolerance: WeatherCondition = WeatherCondition.MODERATE
-    traffic_tolerance: TrafficCondition = TrafficCondition.SLOW
-    crowd_tolerance: CrowdLevel = CrowdLevel.HIGH
-    preferred_time: str = "morning"
-    budget_conscious: bool = False
-    time_conscious: bool = True
-    comfort_priority: bool = False
-    start_date: str = None
-    
-    def __post_init__(self):
-        if self.start_date is None:
-            self.start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-
-@dataclass
-class ThoughtProcess:
-    """思考过程记录"""
-    step: int
-    thought: str
-    keywords: List[str]
-    mcp_services: List[MCPServiceType]
-    reasoning: str
-    timestamp: str
-
-@dataclass
-class UserContext:
-    """用户上下文"""
-    user_id: str
-    conversation_history: List[Dict]
-    travel_preferences: TravelPreference
-    current_plan: Optional[Dict] = None
-    thought_process: List[ThoughtProcess] = None
-    
-    def __post_init__(self):
-        if self.thought_process is None:
-            self.thought_process = []
-
-class DouBaoAgent:
-    """豆包Agent接口"""
-    
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        # 使用正确的豆包API端点
-        self.api_url = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
-        self.headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        # 测试连接
-        self._test_connection()
-    
-    def _test_connection(self):
-        """测试豆包API连接"""
-        try:
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            
-            # 简单的连接测试
-            test_payload = {
-                "model": "doubao-1-5-pro-32k-250115",
-                "messages": [{"role": "user", "content": "你好"}],
-                "max_tokens": 10
-            }
-            
-            response = requests.post(
-                self.api_url,
-                headers=self.headers,
-                json=test_payload,
-                timeout=30,
-                verify=False  # 测试时禁用SSL验证
-            )
-            
-            if response.status_code == 200:
-                logger.info("✅ 豆包API连接测试成功")
-            else:
-                logger.warning(f"⚠️ 豆包API连接测试失败，状态码: {response.status_code}")
-                
-        except Exception as e:
-            logger.warning(f"⚠️ 豆包API连接测试失败: {e}")
-            logger.info("💡 建议检查网络连接或API密钥")
-    
-    def generate_response(self, messages: List[Dict], system_prompt: str = None) -> str:
-        """调用豆包API生成回复"""
-        try:
-            payload = {
-                "model": "doubao-1-5-pro-32k-250115",
-                "messages": messages,
-                "temperature": 0.7,
-                "max_tokens": 2000
-            }
-            
-            if system_prompt:
-                payload["messages"].insert(0, {"role": "system", "content": system_prompt})
-            
-            # 增加重试机制和更长的超时时间
-            for attempt in range(3):
-                try:
-                    # 尝试不同的SSL配置
-                    ssl_configs = [
-                        {"verify": True},  # 标准SSL验证
-                        {"verify": False},  # 禁用SSL验证（仅用于测试）
-                        {"verify": True, "timeout": 120}  # 更长超时时间
-                    ]
-                    
-                    current_config = ssl_configs[min(attempt, len(ssl_configs)-1)]
-                    
-                    response = requests.post(
-                        self.api_url, 
-                        headers=self.headers, 
-                        json=payload, 
-                        timeout=current_config.get("timeout", 60),
-                        verify=current_config["verify"]
-                    )
-                    response.raise_for_status()
-                    
-                    result = response.json()
-                    return result["choices"][0]["message"]["content"]
-                    
-                except requests.exceptions.SSLError as ssl_e:
-                    logger.warning(f"SSL错误，尝试第{attempt+1}次: {ssl_e}")
-                    if attempt == 2:  # 最后一次尝试
-                        raise
-                    continue
-                except requests.exceptions.RequestException as req_e:
-                    logger.warning(f"请求错误，尝试第{attempt+1}次: {req_e}")
-                    if attempt == 2:  # 最后一次尝试
-                        raise
-                    continue
-            
-        except Exception as e:
-            logger.error(f"豆包API调用失败: {e}")
-            # 返回一个基于本地逻辑的回复，而不是完全失败
-            return self._generate_fallback_response(messages)
-    
-    def _generate_fallback_response(self, messages: List[Dict]) -> str:
-        """生成备用回复"""
-        return """我理解您的需求，正在为您规划个性化旅游攻略。
-
-由于网络连接问题，我暂时无法使用豆包Agent为您生成详细回复。
-请稍后再试，或者您可以尝试：
-• 检查网络连接
-• 重新输入您的需求
-• 稍后再次尝试
-
-我会继续收集实时数据来支持您的旅游规划。"""
+# 为了向后兼容，重新导出这些类供外部直接导入
+__all__ = ['EnhancedTravelAgent', 'TravelPreference', 'UserContext', 'ThoughtProcess', 
+           'WeatherCondition', 'TrafficCondition', 'CrowdLevel', 'MCPServiceType',
+           'WeatherInfo', 'RouteInfo', 'POIInfo']
 
 class EnhancedTravelAgent:
     """增强版智能旅行对话Agent"""
@@ -247,16 +80,56 @@ class EnhancedTravelAgent:
         self.config = get_config()
         self.user_contexts = {}
         
-        # 初始化豆包Agent
+        # 根据配置选择AI Provider（优先使用DeepSeek，如果没有则使用豆包）
+        ai_provider = os.getenv('AI_PROVIDER', 'deepseek').lower()
+        deepseek_api_key = get_api_key("DEEPSEEK")
         doubao_api_key = get_api_key("DOUBAO")
-        if not doubao_api_key:
-            raise ValueError("缺少豆包API密钥配置")
-        self.doubao_agent = DouBaoAgent(doubao_api_key)
+        
+        # 初始化AI Agent
+        if ai_provider == 'deepseek' and deepseek_api_key and DEEPSEEK_AVAILABLE and DeepSeekAgent:
+            try:
+                from config import Config
+                self.ai_agent = DeepSeekAgent(
+                    api_key=deepseek_api_key,
+                    base_url=Config.DEEPSEEK_API_BASE,
+                    model=Config.DEEPSEEK_MODEL
+                )
+                self.doubao_agent = self.ai_agent  # 保持向后兼容
+                logger.info("✅ 使用DeepSeek Agent")
+            except Exception as e:
+                logger.warning(f"⚠️ DeepSeek Agent初始化失败: {e}，尝试使用豆包Agent")
+                if doubao_api_key:
+                    self.ai_agent = DouBaoAgent(doubao_api_key)
+                    self.doubao_agent = self.ai_agent  # 保持向后兼容
+                    logger.info("✅ 使用豆包Agent（DeepSeek初始化失败后的备选）")
+                else:
+                    raise ValueError("DeepSeek和豆包API密钥都未配置或初始化失败")
+        elif doubao_api_key:
+            self.ai_agent = DouBaoAgent(doubao_api_key)
+            self.doubao_agent = self.ai_agent  # 保持向后兼容
+            logger.info("✅ 使用豆包Agent")
+        else:
+            raise ValueError("缺少AI API密钥配置（需要DEEPSEEK_API_KEY或DOUBAO_API_KEY）")
         
         # API请求限流控制
         self._api_lock = Lock()
         self._last_api_call = {}  # 记录每个API的最后调用时间
         self._min_interval = 0.35  # 最小请求间隔（秒），确保不超过3次/秒
+        
+        # 加载Excel景点数据
+        self.qunar_places = self._load_qunar_places()
+        
+        # 初始化MCP客户端
+        self.mcp_client = MCPClient(
+            api_lock=self._api_lock,
+            last_api_call=self._last_api_call,
+            min_interval=self._min_interval,
+            qunar_places=self.qunar_places
+        )
+        
+        # 初始化RAG客户端（使用BERT embedding）
+        self.rag_client = None
+        self._init_rag_client()
         
         # 上海地区关键词映射
         self.location_keywords = {
@@ -326,6 +199,396 @@ class EnhancedTravelAgent:
         
         logger.info("🤖 增强版智能旅行对话Agent初始化完成")
     
+    def _init_rag_client(self):
+        """初始化RAG客户端（可选功能，支持数据库和文件两种模式）"""
+        try:
+            import os
+            
+            # 优先尝试使用数据库模式
+            db_url = os.getenv('RAG_DB_URL', '')
+            
+            if db_url:
+                # 数据库模式
+                try:
+                    from Rag import RAGClient, SearchMode
+                    from langchain_openai import OpenAIEmbeddings
+                    openai_api_key = os.getenv('OPENAI_API_KEY', '')
+                    if openai_api_key:
+                        embedding_model = OpenAIEmbeddings(openai_api_key=openai_api_key)
+                        self.rag_client = RAGClient(db_url, embedding_model)
+                        logger.info("✅ RAG客户端初始化成功（数据库模式）")
+                        return
+                except Exception as e:
+                    logger.warning(f"⚠️ 数据库模式RAG初始化失败: {e}，尝试文件模式")
+            
+            # 文件模式（无需数据库）- 使用新的RAG模块（BERT embedding）
+            try:
+                from .rag import RAGClient
+                
+                # 设置存储路径
+                storage_path = os.getenv('RAG_STORAGE_PATH', './rag_storage')
+                
+                # 使用BERT Embedding（默认）
+                # RAGClient会自动初始化BERT模型，如果失败则使用关键词检索
+                self.rag_client = RAGClient(storage_path=storage_path)
+                logger.info(f"✅ RAG客户端初始化成功（BERT Embedding，存储路径: {storage_path}）")
+                
+                # 自动从data目录加载文档
+                self._load_rag_documents_from_data()
+                
+            except ImportError:
+                logger.warning("⚠️ 文件RAG模块导入失败，RAG功能将不可用")
+                self.rag_client = None
+            
+        except Exception as e:
+            logger.warning(f"⚠️ RAG客户端初始化失败: {e}")
+            logger.info("   RAG功能将不可用，但不影响其他功能")
+            self.rag_client = None
+    
+    def _load_rag_documents_from_data(self):
+        """从data目录自动加载RAG文档"""
+        if not self.rag_client:
+            return
+        
+        try:
+            from pathlib import Path
+            import json
+            import glob
+            
+            data_dir = Path(__file__).parent / "data"
+            if not data_dir.exists():
+                logger.warning(f"data目录不存在: {data_dir}")
+                return
+            
+            knowledge_id = "travel_kb_001"
+            documents = []
+            doc_count = 0
+            
+            # 1. 加载rag_corpus/text_documents目录下的所有txt文件
+            text_docs_dir = data_dir / "rag_corpus" / "text_documents"
+            if text_docs_dir.exists():
+                txt_files = list(text_docs_dir.glob("*.txt"))
+                logger.info(f"📚 发现 {len(txt_files)} 个文本文档")
+                
+                for txt_file in txt_files:
+                    try:
+                        with open(txt_file, 'r', encoding='utf-8') as f:
+                            text = f.read()
+                        
+                        if text.strip():
+                            # 文本分块
+                            from .rag.vector_store import text_to_chunk
+                            chunks = text_to_chunk(text, chunk_size=500, chunk_overlap=50)
+                            
+                            for idx, chunk in enumerate(chunks):
+                                documents.append({
+                                    'text': chunk,
+                                    'knowledge_id': knowledge_id,
+                                    'document_id': f"txt_{doc_count}",
+                                    'paragraph_id': f"para_{doc_count}_{idx}",
+                                    'meta': {
+                                        'file_name': txt_file.name,
+                                        'source': 'rag_corpus',
+                                        'chunk_index': idx
+                                    }
+                                })
+                            
+                            doc_count += 1
+                            logger.debug(f"  ✅ 已加载: {txt_file.name} ({len(chunks)}个段落)")
+                    except Exception as e:
+                        logger.warning(f"  ⚠️ 加载文件失败 {txt_file.name}: {e}")
+            
+            # 2. 加载attractions目录下的JSON文件
+            attractions_dir = data_dir / "attractions"
+            if attractions_dir.exists():
+                json_files = list(attractions_dir.glob("*.json"))
+                logger.info(f"🏛️ 发现 {len(json_files)} 个景点JSON文件")
+                
+                for json_file in json_files:
+                    try:
+                        with open(json_file, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                        
+                        # 提取景点信息文本
+                        text_parts = []
+                        if isinstance(data, dict):
+                            # 提取所有有用的字段
+                            if 'attraction_name' in data:
+                                text_parts.append(f"景点名称：{data['attraction_name']}")
+                            elif 'name' in data:
+                                text_parts.append(f"景点名称：{data['name']}")
+                            elif 'title' in data:
+                                text_parts.append(f"景点名称：{data['title']}")
+                            
+                            if 'address' in data:
+                                text_parts.append(f"地址：{data['address']}")
+                            
+                            if 'intro' in data:
+                                text_parts.append(f"简介：{data['intro']}")
+                            
+                            if 'description' in data:
+                                text_parts.append(f"详细描述：{data['description']}")
+                            
+                            # 提取交通指南
+                            if 'transportation_guide' in data:
+                                text_parts.append(f"交通指南：{data['transportation_guide']}")
+                            elif 'transportation' in data:
+                                text_parts.append(f"交通指南：{data['transportation']}")
+                            
+                            # 提取最佳季节
+                            if 'best_season' in data:
+                                text_parts.append(f"最佳季节：{data['best_season']}")
+                            
+                            # 提取开放时间
+                            if 'opening_hours' in data:
+                                text_parts.append(f"开放时间：{data['opening_hours']}")
+                            
+                            # 提取门票信息
+                            if 'ticket_info' in data:
+                                text_parts.append(f"门票信息：{data['ticket_info']}")
+                            
+                            # 提取评分
+                            if 'rating' in data:
+                                text_parts.append(f"评分：{data['rating']}")
+                            
+                            # 提取标签
+                            if 'tags' in data:
+                                tags = data['tags']
+                                if isinstance(tags, list):
+                                    # 过滤掉无效标签
+                                    valid_tags = [t for t in tags if t and isinstance(t, str) and len(t.strip()) > 0 and t != '0']
+                                    if valid_tags:
+                                        text_parts.append(f"标签：{', '.join(valid_tags[:5])}")
+                                elif isinstance(tags, str):
+                                    text_parts.append(f"标签：{tags}")
+                        
+                        text = '\n'.join(text_parts)
+                        if text.strip():
+                            from .rag.vector_store import text_to_chunk
+                            chunks = text_to_chunk(text, chunk_size=500, chunk_overlap=50)
+                            
+                            for idx, chunk in enumerate(chunks):
+                                documents.append({
+                                    'text': chunk,
+                                    'knowledge_id': knowledge_id,
+                                    'document_id': f"attraction_{doc_count}",
+                                    'paragraph_id': f"para_{doc_count}_{idx}",
+                                    'meta': {
+                                        'file_name': json_file.name,
+                                        'source': 'attractions',
+                                        'chunk_index': idx
+                                    }
+                                })
+                            
+                            doc_count += 1
+                            logger.debug(f"  ✅ 已加载: {json_file.name} ({len(chunks)}个段落)")
+                    except Exception as e:
+                        logger.warning(f"  ⚠️ 加载JSON文件失败 {json_file.name}: {e}")
+            
+            # 3. 加载reviews目录下的评论数据
+            reviews_dir = data_dir / "reviews"
+            if reviews_dir.exists():
+                review_files = list(reviews_dir.glob("*.json"))
+                logger.info(f"💬 发现 {len(review_files)} 个评论JSON文件")
+                
+                for review_file in review_files[:10]:  # 限制加载前10个，避免过多
+                    try:
+                        with open(review_file, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                        
+                        # 提取评论文本
+                        text_parts = []
+                        if isinstance(data, list):
+                            for review in data[:10]:  # 每个文件取前10条评论
+                                if isinstance(review, dict):
+                                    content = review.get('content', '')
+                                    if content and len(content.strip()) > 10:  # 过滤太短的评论
+                                        # 提取景点名称
+                                        attraction = review.get('attraction_name', '')
+                                        if attraction:
+                                            text_parts.append(f"{attraction}的评论：{content[:200]}")  # 限制长度
+                                        else:
+                                            text_parts.append(f"评论：{content[:200]}")
+                                    
+                                    rating = review.get('rating')
+                                    if rating and rating > 0:
+                                        text_parts.append(f"评分：{rating}分")
+                        elif isinstance(data, dict):
+                            if 'reviews' in data:
+                                for review in data['reviews'][:10]:
+                                    content = review.get('content', '')
+                                    if content and len(content.strip()) > 10:
+                                        text_parts.append(f"评论：{content[:200]}")
+                        
+                        text = '\n'.join(text_parts)
+                        if text.strip():
+                            from .rag.vector_store import text_to_chunk
+                            chunks = text_to_chunk(text, chunk_size=500, chunk_overlap=50)
+                            
+                            for idx, chunk in enumerate(chunks):
+                                documents.append({
+                                    'text': chunk,
+                                    'knowledge_id': knowledge_id,
+                                    'document_id': f"review_{doc_count}",
+                                    'paragraph_id': f"para_{doc_count}_{idx}",
+                                    'meta': {
+                                        'file_name': review_file.name,
+                                        'source': 'reviews',
+                                        'chunk_index': idx
+                                    }
+                                })
+                            
+                            doc_count += 1
+                            logger.debug(f"  ✅ 已加载: {review_file.name} ({len(chunks)}个段落)")
+                    except Exception as e:
+                        logger.warning(f"  ⚠️ 加载评论文件失败 {review_file.name}: {e}")
+            
+            # 批量添加到RAG知识库
+            if documents:
+                if hasattr(self.rag_client, 'add_documents'):
+                    self.rag_client.add_documents(documents)
+                    logger.info(f"✅ 成功从data目录加载 {len(documents)} 个文档段落到RAG知识库（来自 {doc_count} 个文件）")
+                elif hasattr(self.rag_client, 'batch_save'):
+                    # 如果RAG客户端支持batch_save
+                    self.rag_client.batch_save(documents)
+                    logger.info(f"✅ 成功从data目录加载 {len(documents)} 个文档段落到RAG知识库（来自 {doc_count} 个文件）")
+                else:
+                    logger.warning("RAG客户端不支持批量添加文档")
+            else:
+                logger.info("ℹ️ data目录下没有找到可加载的文档")
+        
+        except Exception as e:
+            logger.error(f"从data目录加载RAG文档失败: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+    
+    def add_documents_from_files(self, file_paths: List[str], knowledge_id: str = "travel_kb_001"):
+        """
+        从文件加载文档到RAG知识库
+        
+        :param file_paths: 文件路径列表（支持.txt, .md, .docx等）
+        :param knowledge_id: 知识库ID
+        """
+        if not self.rag_client:
+            logger.warning("RAG客户端未初始化，无法加载文档")
+            return
+        
+        try:
+            from pathlib import Path
+            import docx
+            
+            documents = []
+            doc_id = 0
+            
+            for file_path in file_paths:
+                path = Path(file_path)
+                if not path.exists():
+                    logger.warning(f"文件不存在: {file_path}")
+                    continue
+                
+                # 读取文件内容
+                text = ""
+                if path.suffix == '.txt' or path.suffix == '.md':
+                    with open(path, 'r', encoding='utf-8') as f:
+                        text = f.read()
+                elif path.suffix == '.docx':
+                    try:
+                        doc = docx.Document(path)
+                        text = '\n'.join([para.text for para in doc.paragraphs])
+                    except Exception as e:
+                        logger.warning(f"读取docx文件失败 {file_path}: {e}")
+                        continue
+                else:
+                    logger.warning(f"不支持的文件格式: {path.suffix}")
+                    continue
+                
+                # 文本分块
+                from .rag.vector_store import text_to_chunk
+                chunks = text_to_chunk(text, chunk_size=500, chunk_overlap=50)
+                
+                # 添加到文档列表
+                for idx, chunk in enumerate(chunks):
+                    documents.append({
+                        'text': chunk,
+                        'knowledge_id': knowledge_id,
+                        'document_id': f"doc_{doc_id}",
+                        'paragraph_id': f"para_{doc_id}_{idx}",
+                        'meta': {
+                            'file_path': str(file_path),
+                            'file_name': path.name,
+                            'chunk_index': idx
+                        }
+                    })
+                
+                doc_id += 1
+                logger.info(f"✅ 已加载文件: {path.name} ({len(chunks)}个段落)")
+            
+            # 批量添加到RAG
+            if documents:
+                if hasattr(self.rag_client, 'add_documents'):
+                    self.rag_client.add_documents(documents)
+                    logger.info(f"✅ 成功添加 {len(documents)} 个文档段落到RAG知识库")
+                else:
+                    logger.warning("RAG客户端不支持批量添加文档")
+        
+        except Exception as e:
+            logger.error(f"从文件加载文档失败: {e}")
+    
+    def _load_qunar_places(self) -> pd.DataFrame:
+        """加载去哪儿景点数据"""
+        try:
+            excel_path = Path(__file__).parent / "data" / "qunar_place.xlsx"
+            if excel_path.exists():
+                df = pd.read_excel(excel_path)
+                logger.info(f"✅ 成功加载去哪儿景点数据: {len(df)}条记录")
+                return df
+            else:
+                logger.warning(f"⚠️ 去哪儿景点数据文件不存在: {excel_path}")
+                return pd.DataFrame()
+        except Exception as e:
+            logger.error(f"❌ 加载去哪儿景点数据失败: {e}")
+            return pd.DataFrame()
+    
+    def _search_qunar_places(self, keyword: str, limit: int = 10) -> List[POIInfo]:
+        """从Excel数据中搜索景点"""
+        if self.qunar_places.empty:
+            return []
+        
+        try:
+            # 在name和intro列中搜索关键词
+            mask = (
+                self.qunar_places['name'].str.contains(keyword, case=False, na=False) |
+                self.qunar_places['intro'].str.contains(keyword, case=False, na=False)
+            )
+            results = self.qunar_places[mask].head(limit)
+            
+            pois = []
+            for _, row in results.iterrows():
+                # 解析districts获取区域信息
+                districts = str(row.get('districts', ''))
+                address = districts.replace('·', '') if districts else ''
+                
+                # 解析point获取坐标
+                point = str(row.get('point', ''))
+                
+                poi = POIInfo(
+                    name=str(row.get('name', '')),
+                    address=address,
+                    rating=float(row.get('score', 0) or 0),
+                    business_hours="",
+                    price=f"{row.get('price', 0)}元" if row.get('price', 0) else "免费",
+                    distance="",
+                    category=str(row.get('star', '')),
+                    reviews=[]
+                )
+                pois.append(poi)
+            
+            logger.info(f"从Excel数据中搜索到{len(pois)}个景点: {keyword}")
+            return pois
+        except Exception as e:
+            logger.error(f"搜索Excel数据失败: {e}")
+            return []
+    
     def process_user_request(self, user_input: str, user_id: str = "default", show_thoughts: bool = True, return_thoughts: bool = False) -> Any:
         """
         处理用户请求的主入口 - 基于思考链的智能Agent系统
@@ -367,8 +630,13 @@ class EnhancedTravelAgent:
         })
         
         print("\n" + "="*80)
-        print("🧠 智能旅游规划Agent - 思考链系统")
+        print("🧠 知小旅 - 智能旅游规划助手")
         print("="*80)
+        
+        # ============ Step 0: 解析标签（如果存在） ============
+        tags = self._parse_tags_from_input(user_input)
+        if any(tags.values()):
+            print(f"\n🏷️  检测到标签：基础标签{len(tags['基础标签'])}个，偏好标签{len(tags['偏好标签'])}个，特殊标签{len(tags['特殊标签'])}个")
         
         # ============ Step 1: 深度理解需求并生成思考链 ============
         print("\n📋 Step 1: 深度理解您的需求...")
@@ -377,19 +645,63 @@ class EnhancedTravelAgent:
         if show_thoughts:
             self._display_thoughts(thoughts)
         
-        # ============ Step 2: 从思考链中提取关键信息 ============
-        print("\n🔍 Step 2: 提取关键信息和规划策略...")
+        # ============ Step 2: 从思考链中提取关键信息并进行分词 ============
+        print("\n🔍 Step 2: 提取关键信息、分词并规划策略...")
         extracted_info = self._extract_info_from_thoughts(thoughts, user_input)
+        # 保存分词结果到extracted_info中
+        if thoughts:
+            extracted_info['tokenized_data'] = self._tokenize_thoughts(thoughts)
+        # 保存标签信息
+        extracted_info['tags'] = tags
+        # 生成用户画像
+        user_profile = self._generate_user_profile(extracted_info, tags)
+        extracted_info['user_profile'] = user_profile
         self._display_extracted_info(extracted_info)
+        
+        # 如果return_thoughts=True，在step2后返回思考结果（仅第一次调用时）
+        # 通过检查context中是否已有思考结果来判断是否是第一次调用
+        if return_thoughts and not hasattr(context, '_thinking_sent'):
+            simplified_thoughts = []
+            for t in thoughts[:2]:  # 只返回前2步的思考过程
+                simplified_thoughts.append({
+                    "step": t.step,
+                    "thought": t.thought,
+                    "keywords": t.keywords[:15],  # 返回更多关键词用于展示
+                    "reasoning": t.reasoning,
+                    "icon": self._get_thought_icon(t.step)
+                })
+            
+            # 标记已发送思考结果
+            context._thinking_sent = True
+            
+            # 返回step1、2的思考结果
+            return {
+                "response": "正在分析你的需求，请稍候...",  # 提示信息
+                "thoughts": simplified_thoughts,
+                "extracted_info": {
+                    "travel_days": extracted_info.get('travel_days', 1),
+                    "locations": extracted_info.get('locations', []),
+                    "enhanced_locations": extracted_info.get('enhanced_locations', []),  # 包含完整的景点信息
+                    "keywords": extracted_info.get('keywords', []),
+                    "activity_types": extracted_info.get('activity_types', []),
+                    "budget_info": extracted_info.get('budget_info', {}),
+                    "companions": self._format_companions(extracted_info.get('companions', {})) if extracted_info.get('companions') else None,
+                    "emotional_context": self._format_emotional_context(extracted_info.get('emotional_context', {})) if extracted_info.get('emotional_context') else None,
+                    "preferences": extracted_info.get('preferences', {}),
+                    "user_intent_summary": extracted_info.get('user_intent_summary', ''),
+                    "tags": extracted_info.get('tags', {})  # 包含标签信息
+                },
+                "status": "thinking"  # 标识这是思考阶段
+            }
         
         # ============ Step 3: 智能API调用决策 ============
         print("\n🤖 Step 3: 决定需要调用的API服务...")
         api_plan = self._plan_api_calls(extracted_info, thoughts)
         self._display_api_plan(api_plan)
         
-        # ============ Step 4: 执行API调用并收集数据 ============
-        print("\n📡 Step 4: 调用API收集实时数据...")
-        real_time_data = self._execute_api_calls(api_plan, extracted_info, context)
+        # ============ Step 4: 执行API调用并收集数据（包括MCP和RAG） ============
+        print("\n📡 Step 4: 调用MCP和RAG服务收集实时数据和知识...")
+        real_time_data = self._execute_api_calls(api_plan, extracted_info, context, thoughts)
         
         # ============ Step 5: 综合分析并生成最终决策 ============
         print("\n💡 Step 5: 综合分析，生成最优旅游攻略...")
@@ -404,6 +716,9 @@ class EnhancedTravelAgent:
             "thoughts": [{"step": t.step, "thought": t.thought, "keywords": t.keywords} for t in thoughts],
             "timestamp": datetime.now().isoformat()
         })
+        
+        # 记忆沉淀：记录用户偏好（如果出现3次以上）
+        self._update_user_memory(context, extracted_info, tags)
         
         print("\n" + "="*80)
         print("✅ 规划完成！")
@@ -424,13 +739,22 @@ class EnhancedTravelAgent:
             
             return {
                 "response": final_response,
-                "thoughts": simplified_thoughts,
+                "thoughts": [],  # 最终回复时不返回思考过程
                 "extracted_info": {
                     "travel_days": extracted_info.get('travel_days', 1),
                     "locations": extracted_info.get('locations', []),
+                    "enhanced_locations": extracted_info.get('enhanced_locations', []),  # 包含完整的景点信息
+                    "keywords": extracted_info.get('keywords', []),
+                    "activity_types": extracted_info.get('activity_types', []),
+                    "budget_info": extracted_info.get('budget_info', {}),
                     "companions": self._format_companions(extracted_info.get('companions', {})) if extracted_info.get('companions') else None,
-                    "emotional_context": self._format_emotional_context(extracted_info.get('emotional_context', {})) if extracted_info.get('emotional_context') else None
-                }
+                    "emotional_context": self._format_emotional_context(extracted_info.get('emotional_context', {})) if extracted_info.get('emotional_context') else None,
+                    "preferences": extracted_info.get('preferences', {}),
+                    "user_intent_summary": extracted_info.get('user_intent_summary', ''),
+                    "tags": extracted_info.get('tags', {}),  # 包含标签信息
+                    "user_profile": extracted_info.get('user_profile', {})  # 包含用户画像
+                },
+                "status": "completed"  # 标识已完成
             }
         else:
             # 仅返回回复文本
@@ -444,32 +768,46 @@ class EnhancedTravelAgent:
     # ==================== 思考链系统核心方法 ====================
     
     def _generate_thought_chain(self, user_input: str, context: UserContext) -> List[ThoughtProcess]:
-        """生成思考链 - 让AI深度分析用户需求"""
-        system_prompt = """你是一个专业的上海旅游规划专家。请深入分析用户的需求，并生成一个详细的思考过程。
+        """生成思考链 - 通过Agent引导生成详细的思考过程"""
+        system_prompt = """你是一个专业的上海旅游规划专家。请深入分析用户的需求，并生成一个详细的、结构化的思考过程。
 
-你需要思考：
-1. 用户的核心需求是什么？（景点、美食、交通、住宿等）
-2. 用户提到了哪些具体地点或区域？
-3. 用户的时间安排如何？（几天、什么时候）
-4. 用户有什么特殊偏好？（不喜欢人多、想要浪漫氛围等）
-5. 需要哪些实时数据来支持决策？（天气、路况、POI等）
+你的任务是：
+1. **深度理解用户需求**：分析用户的核心意图、情感需求、同伴关系、时间安排、预算等
+2. **识别关键信息**：提取地点、时间、活动类型、特殊偏好等关键要素
+3. **规划信息收集策略**：明确需要哪些实时数据（天气、POI、交通、人流等）来支持决策
+4. **思考推理过程**：详细说明每一步的推理逻辑和原因
 
-请以JSON格式返回你的思考过程：
+请以JSON格式返回你的思考过程，要求：
+- 思考步骤要详细、具体，体现你的推理过程
+- 关键词要全面，包括地点、时间、活动、情感等各个方面
+- 明确说明需要哪些API服务来获取数据
+- 每个步骤都要有清晰的推理原因
+
+格式示例：
 {
   "thoughts": [
     {
       "step": 1,
-      "thought": "用户想要规划3天的上海旅游",
-      "keywords": ["3天", "上海", "旅游"],
-      "api_needs": ["天气", "景点"],
-      "reasoning": "需要查询未来3天天气，并推荐适合3天游览的景点"
+      "thought": "首先，我需要理解用户的核心需求。用户想要规划3天的上海旅游，这是一个多日行程规划需求。",
+      "keywords": ["3天", "上海", "旅游", "行程规划"],
+      "api_needs": ["天气", "景点", "POI"],
+      "reasoning": "多日行程需要查询未来3天的天气情况，以便合理安排室内外活动；同时需要搜索适合3天游览的景点和POI信息"
+    },
+    {
+      "step": 2,
+      "thought": "用户提到了具体地点：外滩、豫园。这些是上海的热门景点，需要查询这些地点的详细信息、开放时间、周边推荐等。",
+      "keywords": ["外滩", "豫园", "景点", "开放时间"],
+      "api_needs": ["POI", "导航"],
+      "reasoning": "需要调用POI搜索API获取这些景点的详细信息，并可能需要规划这些景点之间的路线"
     }
   ]
-}"""
+}
+
+请确保思考过程详细、全面，能够为后续的信息收集和方案生成提供充分的基础。"""
         
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"请分析这个需求：{user_input}"}
+            {"role": "user", "content": f"请详细分析这个旅游需求，并给出完整的思考过程：\n\n{user_input}"}
         ]
         
         try:
@@ -493,6 +831,7 @@ class EnhancedTravelAgent:
             
             # 如果AI没有返回有效的思考链，使用备用方法
             if not thoughts:
+                logger.warning("Agent未返回有效思考链，使用备用方法")
                 thoughts = self._fallback_thought_generation(user_input, context)
             
             return thoughts
@@ -616,15 +955,80 @@ class EnhancedTravelAgent:
                 print(f"  需要API: {', '.join(services)}")
             print(f"  原因: {thought.reasoning}")
     
+    def _tokenize_thoughts(self, thoughts: List[ThoughtProcess]) -> Dict[str, Any]:
+        """对Agent给出的思考过程进行分词，提取关键信息用于MCP和RAG调用"""
+        # 合并所有思考过程的文本
+        all_thought_text = []
+        all_keywords = []
+        
+        for thought in thoughts:
+            # 合并思考内容、关键词和推理过程
+            thought_text = f"{thought.thought} {thought.reasoning}"
+            all_thought_text.append(thought_text)
+            all_keywords.extend(thought.keywords)
+        
+        combined_text = " ".join(all_thought_text)
+        
+        # 使用jieba进行分词和关键词提取
+        # 提取关键词（使用TF-IDF算法）
+        keywords_tfidf = jieba.analyse.extract_tags(combined_text, topK=20, withWeight=False)
+        
+        # 提取关键词（使用TextRank算法）
+        keywords_textrank = jieba.analyse.textrank(combined_text, topK=20, withWeight=False)
+        
+        # 合并关键词，去重
+        all_extracted_keywords = list(set(keywords_tfidf + keywords_textrank + all_keywords))
+        
+        # 分词结果
+        words = list(jieba.cut(combined_text))
+        
+        # 提取地点、时间、活动等特定类型的关键词
+        location_keywords = []
+        time_keywords = []
+        activity_keywords = []
+        
+        # 地点相关关键词
+        location_patterns = ["上海", "外滩", "豫园", "东方明珠", "南京路", "人民广场", "田子坊", 
+                            "新天地", "城隍庙", "朱家角", "迪士尼", "陆家嘴", "徐家汇", "静安寺"]
+        # 时间相关关键词
+        time_patterns = ["天", "日", "小时", "早上", "上午", "下午", "晚上", "周末", "工作日"]
+        # 活动相关关键词
+        activity_patterns = ["旅游", "游览", "参观", "美食", "购物", "拍照", "体验", "探索"]
+        
+        for keyword in all_extracted_keywords:
+            if any(pattern in keyword for pattern in location_patterns):
+                location_keywords.append(keyword)
+            elif any(pattern in keyword for pattern in time_patterns):
+                time_keywords.append(keyword)
+            elif any(pattern in keyword for pattern in activity_patterns):
+                activity_keywords.append(keyword)
+        
+        return {
+            "words": words,
+            "keywords": all_extracted_keywords,
+            "location_keywords": location_keywords,
+            "time_keywords": time_keywords,
+            "activity_keywords": activity_keywords,
+            "thought_text": combined_text
+        }
+    
     def _extract_info_from_thoughts(self, thoughts: List[ThoughtProcess], user_input: str) -> Dict[str, Any]:
-        """从思考链中提取关键信息 - 包括人文因素"""
-        # 收集所有关键词
+        """从思考链中提取关键信息 - 包括人文因素和分词结果"""
+        # 对思考过程进行分词
+        tokenized_data = self._tokenize_thoughts(thoughts)
+        
+        # 收集所有关键词（包括Agent给出的和分词提取的）
         all_keywords = []
         for thought in thoughts:
             all_keywords.extend(thought.keywords)
+        all_keywords.extend(tokenized_data["keywords"])
+        all_keywords = list(set(all_keywords))  # 去重
         
-        # 提取地点
+        # 提取地点（优先使用分词结果中的地点关键词）
         locations = self._extract_locations_from_input(user_input)
+        if tokenized_data["location_keywords"]:
+            locations.extend(tokenized_data["location_keywords"])
+            locations = list(set(locations))  # 去重
         
         # 智能选择关键词进行输入提示API调用
         enhanced_locations = []
@@ -633,7 +1037,10 @@ class EnhancedTravelAgent:
         priority_keywords = self._prioritize_keywords_for_inputtips(all_keywords, user_input)
         
         # 只对前5个最重要的关键词使用输入提示API（分批调用避免QPS超限）
-        for i, keyword in enumerate(priority_keywords[:5]):
+        # 过滤掉纯数字和无效关键词
+        valid_keywords = [kw for kw in priority_keywords[:5] if not kw.isdigit() and len(kw.strip()) > 1]
+        
+        for i, keyword in enumerate(valid_keywords):
             try:
                 # 每次调用间隔0.4秒，确保不超过QPS限制
                 if i > 0:
@@ -642,12 +1049,27 @@ class EnhancedTravelAgent:
                 # 使用输入提示API验证和增强地点信息
                 tips = self.get_inputtips(keyword, city="上海", citylimit=True)
                 if tips:
-                    enhanced_locations.append({
-                        "keyword": keyword,
-                        "suggestions": tips[:5],  # 前5个建议
-                        "priority": i + 1
-                    })
-                    logger.info(f"输入提示API成功: {keyword} -> {len(tips)}个建议")
+                    # 只保留有效的地点建议（过滤掉不相关的结果）
+                    valid_tips = [tip for tip in tips if self._is_valid_location(tip.get('name', ''), keyword)]
+                    if valid_tips:
+                        # 确保包含完整的景点信息（名称、地址、区域等）
+                        full_suggestions = []
+                        for tip in valid_tips[:5]:
+                            full_suggestions.append({
+                                "name": tip.get('name', ''),  # 完整景点名称
+                                "address": tip.get('address', ''),  # 完整地址
+                                "district": tip.get('district', ''),  # 区域
+                                "location": tip.get('location', ''),  # 坐标
+                                "typecode": tip.get('typecode', ''),  # 类型代码
+                                "id": tip.get('id', '')  # ID
+                            })
+                        
+                        enhanced_locations.append({
+                            "keyword": keyword,
+                            "suggestions": full_suggestions,  # 完整的景点信息
+                            "priority": i + 1
+                        })
+                        logger.info(f"输入提示API成功: {keyword} -> {len(valid_tips)}个有效建议")
             except Exception as e:
                 logger.warning(f"输入提示API调用失败 for {keyword}: {e}")
                 # 继续处理下一个关键词，不中断整个流程
@@ -945,8 +1367,17 @@ class EnhancedTravelAgent:
         
         if info['enhanced_locations']:
             print(f"  🔍 智能识别的地点:")
-            for loc in info['enhanced_locations'][:3]:
-                print(f"     • {loc['keyword']}: {loc['suggestions'][0]['name'] if loc['suggestions'] else '未找到'}")
+            for loc in info['enhanced_locations'][:5]:
+                if loc.get('suggestions'):
+                    for suggestion in loc['suggestions'][:2]:
+                        name = suggestion.get('name', '未知')
+                        address = suggestion.get('address', suggestion.get('district', ''))
+                        display_text = f"{name}"
+                        if address:
+                            display_text += f"（{address}）"
+                        print(f"     • {display_text}")
+                else:
+                    print(f"     • {loc['keyword']}: 未找到")
         
         if info['activity_types']:
             print(f"  🎯 活动类型: {', '.join(info['activity_types'])}")
@@ -1117,11 +1548,72 @@ class EnhancedTravelAgent:
             if enabled:
                 print(f"  ✓ {api_icons.get(api, api)}")
     
-    def _execute_api_calls(self, api_plan: Dict[str, Any], extracted_info: Dict[str, Any], context: UserContext) -> Dict[str, Any]:
-        """执行API调用"""
+    def _call_rag_service(self, query: str, knowledge_id_list: List[str] = None) -> List[Dict]:
+        """调用RAG服务检索知识库"""
+        try:
+            # 检查是否有RAG客户端可用
+            if not hasattr(self, 'rag_client') or self.rag_client is None:
+                logger.warning("RAG客户端未初始化，跳过RAG检索")
+                return []
+            
+            # 如果没有指定知识库ID，使用默认的
+            if knowledge_id_list is None:
+                knowledge_id_list = ["travel_kb_001"]  # 默认旅游知识库ID
+            
+            # 调用RAG搜索 - 使用新的RAG模块
+            search_mode = SearchMode.BLEND
+            
+            results = self.rag_client.search(
+                query=query,
+                knowledge_id_list=knowledge_id_list,
+                top_n=5,
+                similarity=0.6,
+                search_mode=search_mode  # 混合检索模式
+            )
+            
+            logger.info(f"RAG检索成功，返回{len(results)}条结果")
+            return results
+            
+        except Exception as e:
+            logger.error(f"RAG服务调用失败: {e}")
+            return []
+    
+    def _execute_api_calls(self, api_plan: Dict[str, Any], extracted_info: Dict[str, Any], context: UserContext, thoughts: List[ThoughtProcess] = None) -> Dict[str, Any]:
+        """执行API调用 - 包括MCP和RAG功能"""
         real_time_data = {}
         
+        # 从思考链中获取分词结果（如果已计算）
+        tokenized_data = extracted_info.get('tokenized_data', {})
+        if not tokenized_data and thoughts:
+            tokenized_data = self._tokenize_thoughts(thoughts)
+            extracted_info['tokenized_data'] = tokenized_data
+        
         locations = extracted_info['locations'] if extracted_info['locations'] else ["上海"]
+        
+        # ========== 调用RAG服务 ==========
+        print("  📚 正在调用RAG知识库检索...")
+        rag_results = []
+        
+        # 构建RAG查询：使用思考过程的文本和关键词
+        if tokenized_data:
+            # 使用思考文本作为查询
+            rag_query = tokenized_data.get('thought_text', '')
+            if not rag_query:
+                # 如果没有思考文本，使用关键词组合
+                keywords = tokenized_data.get('keywords', [])
+                rag_query = ' '.join(keywords[:10])  # 使用前10个关键词
+            
+            if rag_query:
+                rag_results = self._call_rag_service(rag_query)
+                if rag_results:
+                    real_time_data["rag"] = {
+                        "query": rag_query,
+                        "results": rag_results,
+                        "count": len(rag_results)
+                    }
+                    logger.info(f"RAG检索成功，获得{len(rag_results)}条相关知识")
+        
+        # ========== 调用MCP服务 ==========
         
         # 调用天气API
         if api_plan["weather"]:
@@ -1552,6 +2044,46 @@ class EnhancedTravelAgent:
         
         return tips
     
+    def _format_rag_results(self, rag_data: Dict[str, Any]) -> str:
+        """格式化RAG检索结果"""
+        if not rag_data or not rag_data.get('results'):
+            return "暂无RAG知识库检索结果。"
+        
+        results = rag_data.get('results', [])
+        query = rag_data.get('query', '未知查询')
+        
+        lines = [f"查询：{query}"]
+        lines.append(f"检索到 {len(results)} 条相关知识：\n")
+        
+        for idx, result in enumerate(results[:5], 1):  # 只显示前5条
+            similarity = result.get('similarity', 0)
+            # 优先使用text字段，如果没有则尝试从metadata获取
+            text = result.get('text', '')
+            if not text:
+                # 尝试从metadata获取
+                meta = result.get('meta', {})
+                text = meta.get('text', '') if isinstance(meta, dict) else ''
+            
+            paragraph_id = result.get('paragraph_id', '')
+            source_id = result.get('source_id', '')
+            
+            # 截断过长的文本
+            if len(text) > 200:
+                text = text[:200] + "..."
+            
+            if text:
+                lines.append(f"{idx}. [相似度: {similarity:.2f}] {text}")
+            else:
+                lines.append(f"{idx}. [相似度: {similarity:.2f}] (段落ID: {paragraph_id})")
+            
+            if source_id and source_id != paragraph_id:
+                lines.append(f"   来源: {source_id}")
+            elif paragraph_id:
+                lines.append(f"   段落ID: {paragraph_id}")
+            lines.append("")
+        
+        return "\n".join(lines)
+    
     def _format_analysis_for_prompt(self, analysis: Dict[str, Any]) -> str:
         """将综合分析结果转为文本"""
         if not analysis:
@@ -1581,18 +2113,95 @@ class EnhancedTravelAgent:
         
         return "\n".join(lines)
     
+    def _parse_tags_from_input(self, user_input: str) -> Dict[str, Any]:
+        """解析用户输入中的标签（#标签格式）"""
+        import re
+        tags = {
+            "基础标签": [],
+            "偏好标签": [],
+            "特殊标签": []
+        }
+        
+        # 匹配 #标签 格式
+        tag_pattern = r'#([^\s#]+)'
+        found_tags = re.findall(tag_pattern, user_input)
+        
+        # 基础标签关键词
+        basic_keywords = ["天", "晚", "大", "小", "预算", "元", "万", "千", "上海", "北京", "广州"]
+        # 偏好标签关键词
+        preference_keywords = ["亲子", "情侣", "浪漫", "美食", "购物", "文化", "自然", "避开", "不赶", "必吃", "必去"]
+        # 特殊标签关键词
+        special_keywords = ["老人", "儿童", "推车", "雨天", "备选", "轮椅", "无障碍"]
+        
+        for tag in found_tags:
+            tag_lower = tag.lower()
+            if any(kw in tag for kw in basic_keywords):
+                tags["基础标签"].append(tag)
+            elif any(kw in tag for kw in preference_keywords):
+                tags["偏好标签"].append(tag)
+            elif any(kw in tag for kw in special_keywords):
+                tags["特殊标签"].append(tag)
+            else:
+                # 默认归类为偏好标签
+                tags["偏好标签"].append(tag)
+        
+        return tags
+    
+    def _generate_user_profile(self, extracted_info: Dict[str, Any], tags: Dict[str, Any]) -> Dict[str, Any]:
+        """生成用户画像"""
+        profile = {
+            "出行人群": [],
+            "核心偏好": [],
+            "限制条件": []
+        }
+        
+        # 解析同伴信息
+        companions = extracted_info.get('companions', {})
+        if companions.get('type'):
+            companion_desc = self._format_companions(companions)
+            profile["出行人群"].append(companion_desc)
+        
+        # 解析预算
+        budget_info = extracted_info.get('budget_info', {})
+        if budget_info.get('amount'):
+            budget_desc = self._format_budget(budget_info)
+            profile["限制条件"].append(f"预算：{budget_desc}")
+        
+        # 解析偏好
+        preferences = extracted_info.get('preferences', [])
+        if preferences:
+            pref_desc = self._format_preferences(preferences)
+            profile["核心偏好"].append(pref_desc)
+        
+        # 从标签中提取信息
+        for tag in tags.get("特殊标签", []):
+            if "老人" in tag or "65" in tag:
+                profile["限制条件"].append("需无障碍设施、电梯景点")
+            if "儿童" in tag or "推车" in tag:
+                profile["限制条件"].append("儿童推车可通行、避开台阶多的路段")
+            if "雨天" in tag:
+                profile["限制条件"].append("雨天备选方案")
+        
+        for tag in tags.get("偏好标签", []):
+            if "不赶" in tag or "慢" in tag:
+                profile["核心偏好"].append("轻松节奏（日均景点≤3个）")
+            if "避开" in tag or "人群" in tag:
+                profile["核心偏好"].append("避开人群")
+            if "美食" in tag or "本帮菜" in tag:
+                profile["核心偏好"].append("本地美食")
+        
+        return profile
+    
     def _generate_final_decision(self, user_input: str, thoughts: List[ThoughtProcess], 
                                 extracted_info: Dict[str, Any], real_time_data: Dict[str, Any],
                                 context: UserContext) -> str:
-        """生成最终决策 - 强调人文因素"""
-        system_prompt = """你是一个充满人情味、专业又温暖的上海本地旅游规划师。你不仅懂旅游，更懂人心。
+        """生成最终决策 - 「知小旅」身份，全流程旅行规划服务"""
+        system_prompt = """你是「知小旅」，一个像真人顾问一样懂需求、会变通的智能旅游规划助手。
 
-🌟 你的性格特质：
-1. **温暖体贴**：像朋友一样真诚，用心感受用户的每一个需求和期待
-2. **专业可靠**：基于实时数据（天气、路况、人流、POI）制定科学合理的行程
-3. **细腻周到**：注意到用户没说出口的需求，提供超出预期的贴心建议
-4. **有生活气息**：分享本地人才知道的小tips，让旅行更地道
-5. **情感共鸣**：理解旅行背后的意义（浪漫、温馨、放松、探索等）
+🎯 你的身份定位：
+- 名称固定为「知小旅」，语气亲和自然（如"根据你的情况，我帮你留意了这些细节～"）
+- 核心能力：从用户需求出发，完成"需求解码→数据整合→方案生成→交互优化→记忆沉淀"的闭环服务
+- 避免机械性回复，要像朋友一样真诚、贴心
 
 💝 回复风格要求：
 1. **开头先共情**：理解并表达对用户情感需求的认同
@@ -1600,9 +2209,10 @@ class EnhancedTravelAgent:
    - 例："带父母出行最重要的是让他们舒适省心，我特别理解"
    
 2. **用词温暖自然**：
-   - 多用"您"、"咱们"、"我建议"
+   - 多用"你"、"咱们"、"我帮你留意了"
    - 避免生硬的"应该"、"必须"
    - 用"～"、"呢"、"哦"等语气词增加亲和力
+   - 使用"知小旅"自称，不要说"我是AI"或"我是系统"
    
 3. **加入情感细节**：
    - 推荐景点时说明"为什么适合你们"
@@ -1614,10 +2224,10 @@ class EnhancedTravelAgent:
    - 例：不说"人流密度中等"，而说"这时候人不算多，逛起来会比较舒服"
 
 🎯 核心原则：
-1. **首先理解情感需求**：
-   - 情侣：浪漫、惊喜、拍照、私密空间
-   - 家人：便捷、舒适、安全、适合所有年龄
-   - 朋友：有趣、新潮、热闹、拍照打卡
+1. **深度理解需求**：
+   - 显性需求：时间、人数、目的地、预算、核心诉求
+   - 隐性需求：根据标签/描述挖掘潜在需求（如#带老人→优先电梯景点/午休1.5小时；#儿童推车→避开台阶多的路段）
+   - 冲突协调：若需求矛盾（如"预算有限+住迪士尼酒店"），需主动提示并提供折中方案
    
 2. **严格尊重用户偏好**：
    - "避开人群"→推荐小众安静的地方
@@ -1638,14 +2248,19 @@ class EnhancedTravelAgent:
    - 无论用户是否提及，都要提供至少3个核心POI或体验的推荐理由
    - 若实时数据缺失，需诚实告知并给出替代建议
 
-📝 回复结构建议：
-1. **温暖的开场**（共情+理解需求）
-2. **我的思考**（简要说明规划逻辑）
-3. **详细行程**（具体安排+理由）
-4. **贴心提示**（实用建议+温馨关怀）
-5. **真诚祝福**（期待他们玩得开心）
+📝 输出结构要求（必须包含以下内容）：
+1. **行程主题**：一句话概括（如"上海4天亲子慢游：经典地标+轻松体验，兼顾老人舒适"）
+2. **行程总览**：含天数、总预算、室内/室外占比、核心亮点
+3. **每日细化行程**：
+   - 时间轴：精确到30分钟（如"09:30-11:00 外滩漫步（户外）→11:00-11:30 休息区补给→11:30-13:00 餐厅用餐（室内）"）
+   - 细节标注：步行距离、儿童友好提示、老人便利信息
+4. **备选方案库**：每个核心节点提供2个备选，附替换理由+优劣势对比
+5. **实用工具箱**：
+   - 天气提醒：按天标注穿衣建议
+   - 预约指南：附各景点/餐厅预约入口+操作步骤
+   - 物品清单：按人群分类
 
-请用充满人情味的方式，生成让用户感到被理解、被关心的旅游攻略。记住：你不是冰冷的AI，而是一个热爱上海、懂得生活的本地朋友。"""
+请用充满人情味的方式，生成让用户感到被理解、被关心的旅游攻略。记住：你是「知小旅」，一个热爱上海、懂得生活的本地朋友。"""
         
         # 构建思考过程摘要
         thoughts_summary = "\n".join([
@@ -1693,10 +2308,46 @@ class EnhancedTravelAgent:
         
         human_factors_text = "\n- ".join(human_factors) if human_factors else "无特殊要求"
         
+        # 格式化RAG结果
+        rag_text = self._format_rag_results(real_time_data.get('rag', {}))
+        
+        # 格式化用户画像
+        user_profile = extracted_info.get('user_profile', {})
+        profile_text = ""
+        if user_profile:
+            profile_text = "【用户画像】\n"
+            if user_profile.get("出行人群"):
+                profile_text += f"出行人群：{', '.join(user_profile['出行人群'])}\n"
+            if user_profile.get("核心偏好"):
+                profile_text += f"核心偏好：{', '.join(user_profile['核心偏好'])}\n"
+            if user_profile.get("限制条件"):
+                profile_text += f"限制条件：{', '.join(user_profile['限制条件'])}\n"
+        
+        # 格式化标签信息
+        tags = extracted_info.get('tags', {})
+        tags_text = ""
+        if any(tags.values()):
+            tags_text = "【标签信息】\n"
+            if tags.get("基础标签"):
+                tags_text += f"基础标签：{', '.join([f'#{t}' for t in tags['基础标签']])}\n"
+            if tags.get("偏好标签"):
+                tags_text += f"偏好标签：{', '.join([f'#{t}' for t in tags['偏好标签']])}\n"
+            if tags.get("特殊标签"):
+                tags_text += f"特殊标签：{', '.join([f'#{t}' for t in tags['特殊标签']])}\n"
+        
         user_message = f"""用户需求：{user_input}
 
+{tags_text}
+{profile_text}
+
+【第一步：Agent思考链】
 我的思考过程：
 {thoughts_summary}
+
+【第二步：分词提取的关键信息】
+- 地点关键词：{', '.join(extracted_info.get('tokenized_data', {}).get('location_keywords', [])[:5]) if extracted_info.get('tokenized_data') else '未提取'}
+- 时间关键词：{', '.join(extracted_info.get('tokenized_data', {}).get('time_keywords', [])[:5]) if extracted_info.get('tokenized_data') else '未提取'}
+- 活动关键词：{', '.join(extracted_info.get('tokenized_data', {}).get('activity_keywords', [])[:5]) if extracted_info.get('tokenized_data') else '未提取'}
 
 【重要】人文因素分析（请特别关注）：
 - {human_factors_text}
@@ -1706,16 +2357,85 @@ class EnhancedTravelAgent:
 - 地点：{', '.join(extracted_info['locations']) if extracted_info['locations'] else '未指定'}
 - 活动类型：{', '.join(extracted_info['activity_types']) if extracted_info['activity_types'] else '未指定'}
 
-实时数据：
+【第三步：MCP实时数据】
 {json.dumps(serializable_data, ensure_ascii=False, indent=2)}
 
-请基于以上信息，生成优化的旅游攻略。
+【第四步：RAG知识库检索结果】
+{rag_text}
+
+请基于以上所有信息（Agent思考链、分词结果、MCP实时数据、RAG知识库信息），生成第一版旅游攻略方案。
+
+⚠️ **重要约束：避免重复规划**
+1. **严禁重复推荐**：同一个景点/餐厅在多天行程中最多只能出现1次，除非用户明确要求重复游览
+2. **每天不同主题**：每天的行程应该有不同的主题和重点，避免雷同
+3. **景点多样性**：确保每天推荐的景点、餐厅、活动都不相同
+4. **检查清单**：生成方案前，请检查是否有多天重复同一个地点的情况，如有请立即调整
+
+📋 输出格式要求（必须严格按照以下结构，使用Markdown格式）：
+
+1. **行程主题**（第一行，加粗，必须）
+   - 格式：**行程主题：** [一句话概括，如"上海4天亲子慢游：经典地标+轻松体验，兼顾老人舒适"]
+
+2. **行程总览**（结构化展示，必须）
+   ```
+   天数：[X]天
+   总预算：约¥[金额]
+   室内/室外占比：[X]%室内 + [Y]%室外
+   核心亮点：
+   • [亮点1]
+   • [亮点2]
+   • [亮点3]
+   ```
+
+3. **每日细化行程**（按天分段，精确到30分钟，必须）
+   - 格式示例：
+     **第1天：[日期]**
+     
+     **09:30-11:00** 外滩漫步
+     - 类型：户外景点
+     - 位置：黄浦区中山东一路
+     - 距离：约800米，平坦无台阶
+     - 👶 儿童友好：有母婴室
+     - 👴 老人便利：可租轮椅
+     - 💡 推荐理由：[为什么推荐这里]
+     
+     **11:00-11:30** 休息区补给
+     - 位置：[具体位置]
+     
+     **11:30-13:00** 餐厅用餐
+     - 餐厅：[餐厅名]
+     - 位置：[地址]
+     - 类型：室内
+     - 💰 人均消费：约¥[金额]
+
+4. **备选方案库**（每个核心节点提供2个备选，可选）
+   - 格式：
+     **备选方案：**
+     - 若遇雨天，外滩替换为上海历史博物馆
+       理由：室内避雨，但互动性稍弱
+       优势：完全避雨，有丰富展品
+       劣势：缺少户外体验
+
+5. **实用工具箱**
+   - **天气提醒**：按天标注穿衣建议（如"11月22日10-15℃，建议老人穿羽绒服+防滑鞋"）
+   - **预约指南**：附各景点/餐厅预约入口+操作步骤+最佳预约时间
+   - **物品清单**：按人群分类（儿童：推车、保温杯；老人：降压药、折叠凳）
 
 特别提醒：
-1. 必须在攻略中体现对同伴关系的关注（如：女朋友、父母等）
-2. 必须根据情感需求调整推荐（如：浪漫氛围、避开人群等）
-3. 必须考虑预算档次来推荐合适的消费场所
-4. 在攻略开头简要说明你的思考逻辑和对用户需求的理解"""
+1. **严格限制地区**：只推荐上海地区的景点、餐厅、商店等，绝对不要推荐北京、广州、深圳等其他城市的任何地点。
+2. **过滤非上海内容**：在生成回复前，请仔细检查所有推荐的地点，确保它们都在上海。
+3. 必须在攻略中体现对同伴关系的关注（如：女朋友、父母等）
+4. 必须根据情感需求调整推荐（如：浪漫氛围、避开人群等）
+5. 必须考虑预算档次来推荐合适的消费场所
+6. 在攻略开头简要说明你的思考逻辑和对用户需求的理解
+7. 充分利用RAG知识库中的相关信息，提供更专业、更地道的建议
+8. **重要**：如果推荐的地点中包含"北京"字样，请确认是上海的"北京东路"或"北京西路"等街道，而不是北京市的景点。
+9. **反馈引导**：在方案结尾添加："这份行程是否符合你的预期？可选择：①满意 ②不满意（请说明具体调整点）"
+10. **重复检查**：生成方案后，请自我检查：
+    - 是否有同一个景点在多天出现？如有，请替换为其他景点
+    - 是否有同一个餐厅在多天出现？如有，请替换为其他餐厅
+    - 每天的行程主题是否不同？如相同，请调整主题和景点选择
+    - 确保每天都有新的体验和不同的地点 """
         
         if recommendation_analysis:
             analysis_text = self._format_analysis_for_prompt(recommendation_analysis)
@@ -1726,7 +2446,166 @@ class EnhancedTravelAgent:
             {"role": "user", "content": user_message}
         ]
         
-        return self.doubao_agent.generate_response(messages)
+        response = self.doubao_agent.generate_response(messages)
+        
+        # 后处理：过滤掉回复中可能出现的非上海地区推荐
+        response = self._filter_response_for_shanghai_only(response)
+        
+        # 后处理：检查并修复重复规划问题
+        response = self._check_and_fix_duplicates(response, extracted_info)
+        
+        return response
+    
+    def _filter_response_for_shanghai_only(self, response: str) -> str:
+        """过滤回复中的非上海地区推荐"""
+        if not response:
+            return response
+        
+        # 非上海城市关键词（排除上海的街道名）
+        non_shanghai_cities = [
+            "北京", "广州", "深圳", "杭州", "南京", "苏州", "成都", "重庆",
+            "西安", "武汉", "天津", "长沙", "郑州", "济南", "青岛", "大连",
+            "厦门", "福州", "合肥", "南昌", "石家庄", "太原", "哈尔滨", "长春",
+            "沈阳", "昆明", "贵阳", "南宁", "海口", "乌鲁木齐", "拉萨", "银川",
+            "西宁", "兰州", "呼和浩特"
+        ]
+        
+        # 上海的街道名（这些应该保留）
+        shanghai_streets = [
+            "北京东路", "北京西路", "南京东路", "南京西路", "淮海东路", "淮海西路",
+            "中山北路", "中山南路", "中山中路", "中山东路", "延安东路", "延安西路",
+            "延安中路", "四川北路", "四川南路", "四川中路"
+        ]
+        
+        lines = response.split('\n')
+        filtered_lines = []
+        
+        for line in lines:
+            # 检查是否包含非上海城市关键词
+            should_remove = False
+            
+            for city in non_shanghai_cities:
+                if city in line:
+                    # 检查是否是上海的街道名
+                    is_shanghai_street = any(street in line for street in shanghai_streets)
+                    if not is_shanghai_street:
+                        # 检查是否是推荐行（包含"推荐"、"建议"、"可以去"等）
+                        if any(keyword in line for keyword in ["推荐", "建议", "可以去", "值得", "位于", "在", "位于北京", "位于广州", "位于深圳"]):
+                            should_remove = True
+                            logger.warning(f"过滤回复中的非上海推荐: {line[:50]}...")
+                            break
+            
+            if not should_remove:
+                filtered_lines.append(line)
+        
+        if len(filtered_lines) < len(lines):
+            logger.info(f"回复过滤: 原始{len(lines)}行，过滤后{len(filtered_lines)}行（已删除{len(lines) - len(filtered_lines)}行非上海推荐）")
+        
+        return '\n'.join(filtered_lines)
+    
+    def _check_and_fix_duplicates(self, response: str, extracted_info: Dict[str, Any]) -> str:
+        """检查并修复行程中的重复规划问题"""
+        if not response:
+            return response
+        
+        import re
+        
+        # 提取所有提到的地点
+        lines = response.split('\n')
+        mentioned_places = {}
+        day_pattern = re.compile(r'第(\d+)天|Day\s*(\d+)', re.IGNORECASE)
+        place_pattern = re.compile(r'前往([^（(]+)|([^（(]+)（', re.IGNORECASE)
+        restaurant_pattern = re.compile(r'餐厅[用餐]?[：:]\s*([^，,。\n]+)', re.IGNORECASE)
+        
+        current_day = None
+        duplicates_found = []
+        
+        for i, line in enumerate(lines):
+            # 检测天数
+            day_match = day_pattern.search(line)
+            if day_match:
+                current_day = int(day_match.group(1) or day_match.group(2))
+                continue
+            
+            if current_day is None:
+                continue
+            
+            # 检测景点
+            place_match = place_pattern.search(line)
+            if place_match:
+                place = (place_match.group(1) or place_match.group(2)).strip()
+                if place and len(place) > 2:  # 过滤太短的匹配
+                    place = place.replace('前往', '').replace('前往', '').strip()
+                    if place in mentioned_places:
+                        duplicates_found.append((current_day, place, mentioned_places[place]))
+                    else:
+                        mentioned_places[place] = current_day
+            
+            # 检测餐厅
+            restaurant_match = restaurant_pattern.search(line)
+            if restaurant_match:
+                restaurant = restaurant_match.group(1).strip()
+                if restaurant and len(restaurant) > 2:
+                    if restaurant in mentioned_places:
+                        duplicates_found.append((current_day, restaurant, mentioned_places[restaurant]))
+                    else:
+                        mentioned_places[restaurant] = current_day
+        
+        # 如果发现重复，添加警告提示
+        if duplicates_found:
+            warning = "\n\n⚠️ **检测到重复规划问题**：\n"
+            for day, place, first_day in duplicates_found:
+                warning += f"- 第{day}天和第{first_day}天都安排了「{place}」，建议替换为其他地点\n"
+            warning += "\n请知小旅重新规划，确保每天都有不同的景点和餐厅。\n"
+            
+            # 在回复末尾添加警告
+            if "这份行程是否符合你的预期" not in response:
+                response += warning
+            else:
+                # 在反馈引导前插入警告
+                response = response.replace(
+                    "这份行程是否符合你的预期",
+                    warning + "这份行程是否符合你的预期"
+                )
+            
+            logger.warning(f"检测到重复规划：{duplicates_found}")
+        
+        return response
+    
+    def _update_user_memory(self, context: UserContext, extracted_info: Dict[str, Any], tags: Dict[str, Any]):
+        """更新用户记忆，沉淀稳定偏好"""
+        memory = context.user_memory
+        
+        # 记录最近的偏好选择
+        recent_preferences = []
+        
+        # 从extracted_info中提取偏好
+        if extracted_info.get('preferences'):
+            recent_preferences.extend(extracted_info['preferences'])
+        
+        if extracted_info.get('companions') and extracted_info['companions'].get('type'):
+            recent_preferences.append(f"companion_{extracted_info['companions']['type']}")
+        
+        if extracted_info.get('budget_info') and extracted_info['budget_info'].get('level'):
+            recent_preferences.append(f"budget_{extracted_info['budget_info']['level']}")
+        
+        # 从标签中提取偏好
+        for tag_list in tags.values():
+            for tag in tag_list:
+                recent_preferences.append(f"tag_{tag}")
+        
+        # 更新最近选择（保留最近10次）
+        memory['recent_choices'].extend(recent_preferences)
+        memory['recent_choices'] = memory['recent_choices'][-10:]
+        
+        # 统计偏好出现次数，如果>=3次则加入稳定偏好
+        from collections import Counter
+        preference_counts = Counter(memory['recent_choices'])
+        
+        for pref, count in preference_counts.items():
+            if count >= 3 and pref not in memory['stable_preferences']:
+                memory['stable_preferences'][pref] = count
+                logger.info(f"记录稳定偏好: {pref} (出现{count}次)")
     
     # ==================== 原有方法（保留向后兼容） ====================
     
@@ -1787,127 +2666,94 @@ class EnhancedTravelAgent:
         # 按正确顺序调用MCP服务
         for service in required_services:
             try:
+                # 使用MCP客户端统一调用服务
                 if service == MCPServiceType.WEATHER:
-                    # logger.info("🌤️ 调用天气服务")
                     weather_data = {}
-                    if extracted_locations:
-                        for location in extracted_locations:
-                            weather = self.get_weather(location, context.travel_preferences.start_date)
-                            weather_data[location] = weather
-                    else:
-                        weather = self.get_weather("上海", context.travel_preferences.start_date)
-                        weather_data["上海"] = weather
+                    locations = extracted_locations if extracted_locations else ["上海"]
+                    for location in locations:
+                        weather = self.mcp_client.call_service(
+                            MCPServiceType.WEATHER,
+                            city=location,
+                            date=context.travel_preferences.start_date
+                        )
+                        weather_data[location] = weather
                     real_time_data["weather"] = weather_data
                 
                 elif service == MCPServiceType.POI:
-                    # logger.info("🔍 调用POI服务")
                     poi_data = {}
                     try:
-                        if extracted_locations:
-                            for location in extracted_locations:
-                                # 确保搜索的是上海地区的POI
-                                attractions = self.search_poi("景点", location, "110000")
-                                poi_data[f"{location}_景点"] = attractions
-                                
-                                restaurants = self.search_poi("餐厅", location, "050000")
-                                poi_data[f"{location}_餐饮"] = restaurants
-                        else:
-                            # 搜索上海的主要景点
-                            attractions = self.search_poi("景点", "上海", "110000")
-                            poi_data["上海景点"] = attractions
+                        locations = extracted_locations if extracted_locations else ["上海"]
+                        for location in locations:
+                            attractions = self.mcp_client.call_service(
+                                MCPServiceType.POI,
+                                keyword="景点",
+                                city=location,
+                                category="110000"
+                            )
+                            poi_data[f"{location}_景点"] = attractions
                             
-                            restaurants = self.search_poi("餐厅", "上海", "050000")
-                            poi_data["上海餐饮"] = restaurants
+                            restaurants = self.mcp_client.call_service(
+                                MCPServiceType.POI,
+                                keyword="餐厅",
+                                city=location,
+                                category="050000"
+                            )
+                            poi_data[f"{location}_餐饮"] = restaurants
                     except Exception as e:
                         logger.error(f"POI服务调用失败: {e}")
-                        # 返回模拟POI数据
-                        poi_data = {
-                            "上海景点": [
-                                {"name": "外滩", "address": "黄浦区中山东一路", "rating": 4.5},
-                                {"name": "豫园", "address": "黄浦区安仁街132号", "rating": 4.3},
-                                {"name": "南京路步行街", "address": "黄浦区南京东路", "rating": 4.2}
-                            ],
-                            "上海餐饮": [
-                                {"name": "老正兴菜馆", "address": "黄浦区南京东路", "rating": 4.4},
-                                {"name": "绿波廊", "address": "黄浦区豫园路", "rating": 4.3}
-                            ]
-                        }
                     real_time_data["poi"] = poi_data
                 
                 elif service == MCPServiceType.NAVIGATION:
-                    # logger.info("🗺️ 调用导航服务")
                     navigation_data = {}
-                    
-                    # 优先使用从用户输入中提取的路线信息
                     if route_info:
                         start = route_info["start"]
                         end = route_info["end"]
-                        routes = self.get_navigation_routes(start, end)
+                        routes = self.mcp_client.call_service(
+                            MCPServiceType.NAVIGATION,
+                            origin=start,
+                            destination=end
+                        )
                         navigation_data[f"{start}_to_{end}"] = routes
-                        # 保存路线信息供路况服务使用
                         real_time_data["_route_info"] = route_info
                     elif len(extracted_locations) >= 2:
                         for i in range(len(extracted_locations) - 1):
                             start = extracted_locations[i]
                             end = extracted_locations[i + 1]
-                            routes = self.get_navigation_routes(start, end)
+                            routes = self.mcp_client.call_service(
+                                MCPServiceType.NAVIGATION,
+                                origin=start,
+                                destination=end
+                            )
                             navigation_data[f"{start}_to_{end}"] = routes
-                    else:
-                        # 如果没有明确的路线，尝试从用户输入中推断
-                        inferred_route = self._infer_route_from_input(user_input)
-                        if inferred_route:
-                            routes = self.get_navigation_routes(inferred_route["start"], inferred_route["end"])
-                            navigation_data[f"{inferred_route['start']}_to_{inferred_route['end']}"] = routes
-                            real_time_data["_route_info"] = inferred_route
-                        else:
-                            # 默认路线
-                            routes = self.get_navigation_routes("人民广场", "外滩")
-                            navigation_data["人民广场_to_外滩"] = routes
-                    
                     real_time_data["navigation"] = navigation_data
                 
                 elif service == MCPServiceType.TRAFFIC:
-                    # logger.info("🚦 调用路况服务")
                     traffic_data = {}
-                    
-                    # 路况服务应该在导航之后调用，针对具体路线
                     if "_route_info" in real_time_data:
                         route_info = real_time_data["_route_info"]
-                        # 获取路线上的主要路段路况
                         start = route_info["start"]
                         end = route_info["end"]
-                        traffic_start = self.get_traffic_status(start)
-                        traffic_end = self.get_traffic_status(end)
+                        traffic_start = self.mcp_client.call_service(MCPServiceType.TRAFFIC, area=start)
+                        traffic_end = self.mcp_client.call_service(MCPServiceType.TRAFFIC, area=end)
                         traffic_data[f"{start}_to_{end}"] = {
                             "start_location": traffic_start,
                             "end_location": traffic_end
                         }
                     elif extracted_locations:
                         for location in extracted_locations:
-                            traffic = self.get_traffic_status(location)
+                            traffic = self.mcp_client.call_service(MCPServiceType.TRAFFIC, area=location)
                             traffic_data[location] = traffic
                     else:
-                        traffic = self.get_traffic_status("上海")
+                        traffic = self.mcp_client.call_service(MCPServiceType.TRAFFIC, area="上海")
                         traffic_data["上海"] = traffic
-                    
                     real_time_data["traffic"] = traffic_data
                 
                 elif service == MCPServiceType.CROWD:
-                    # logger.info("👥 调用人流服务")
                     crowd_data = {}
-                    if extracted_locations:
-                        for location in extracted_locations:
-                            crowd_data[location] = {
-                                "level": "moderate",
-                                "description": "人流适中",
-                                "recommendation": "适合游览"
-                            }
-                    else:
-                        crowd_data["上海"] = {
-                            "level": "moderate",
-                            "description": "人流适中",
-                            "recommendation": "适合游览"
-                        }
+                    locations = extracted_locations if extracted_locations else ["上海"]
+                    for location in locations:
+                        crowd = self.mcp_client.call_service(MCPServiceType.CROWD, location=location)
+                        crowd_data[location] = crowd
                     real_time_data["crowd"] = crowd_data
                 
             except Exception as e:
@@ -2438,10 +3284,35 @@ class EnhancedTravelAgent:
     def _prioritize_keywords_for_inputtips(self, keywords: List[str], user_input: str) -> List[str]:
         """为输入提示API智能排序关键词优先级"""
         
+        # 过滤无效关键词：纯数字、单个字符、常见停用词
+        invalid_patterns = [
+            r'^\d+$',  # 纯数字
+            r'^[a-zA-Z]$',  # 单个字母
+            r'^(的|了|是|在|有|和|与|或|但|而|也|都|就|还|更|最|很|非常|特别|非常|十分)$',  # 停用词
+        ]
+        import re
+        
+        filtered_keywords = []
+        for keyword in keywords:
+            # 跳过纯数字
+            if keyword.isdigit():
+                continue
+            # 跳过单个字符
+            if len(keyword.strip()) <= 1:
+                continue
+            # 跳过停用词
+            is_invalid = False
+            for pattern in invalid_patterns:
+                if re.match(pattern, keyword.strip()):
+                    is_invalid = True
+                    break
+            if not is_invalid:
+                filtered_keywords.append(keyword)
+        
         # 定义优先级权重
         priority_scores = {}
         
-        for keyword in keywords:
+        for keyword in filtered_keywords:
             score = 0
             
             # 1. 地点类关键词优先级最高
@@ -2569,7 +3440,33 @@ class EnhancedTravelAgent:
             if area in user_input:
                 locations.append(area)
         
+        # 去重并过滤
+        locations = list(set(locations))
         return locations
+    
+    def _is_valid_location(self, location_name: str, keyword: str) -> bool:
+        """判断是否是有效的地点名称"""
+        if not location_name or len(location_name.strip()) < 2:
+            return False
+        
+        # 过滤掉明显不是地点的结果
+        invalid_patterns = ['%', '会议', '中心', '购物', '艺术中心']
+        location_lower = location_name.lower()
+        
+        # 如果关键词是数字，直接拒绝
+        if keyword.isdigit():
+            return False
+        
+        # 如果地点名称包含关键词，认为是相关的
+        if keyword in location_name:
+            return True
+        
+        # 如果地点名称包含无效模式，拒绝
+        for pattern in invalid_patterns:
+            if pattern in location_name and keyword not in location_name:
+                return False
+        
+        return True
     
     def _extract_route_from_input(self, user_input: str) -> Optional[Dict[str, str]]:
         """从用户输入中提取路线信息"""
@@ -2637,244 +3534,94 @@ class EnhancedTravelAgent:
             logger.error(f"API请求失败: {url}, 错误: {e}")
             return {}
     
-    def get_weather(self, city: str, date: str) -> List[WeatherInfo]:
-        """获取天气信息 - 直接调用API，无缓存"""
-        logger.info(f"调用天气API获取实时数据: {city}")
-        
-        try:
-            city_code = self._get_city_code(city)
-            
-            params = {
-                "key": get_api_key("AMAP_WEATHER"),
-                "city": city_code,
-                "extensions": "all"
-            }
-            
-            result = self._make_request(AMAP_CONFIG["weather_url"], params, "weather")
-            
-            if result.get("status") == "1":
-                forecasts = result.get("forecasts", [])
-                if forecasts:
-                    weather_data = []
-                    for forecast in forecasts[0].get("casts", []):
-                        weather_info = WeatherInfo(
-                            date=forecast.get("date", ""),
-                            weather=forecast.get("dayweather", ""),
-                            temperature=f"{forecast.get('nighttemp', '')}°C-{forecast.get('daytemp', '')}°C",
-                            wind=forecast.get("daywind", ""),
-                            humidity=forecast.get("daypower", ""),
-                            precipitation=forecast.get("dayprecipitation", "")
-                        )
-                        weather_data.append(weather_info)
-                    
-                    logger.info(f"天气API调用成功: {city} - {len(weather_data)}条数据")
-                    return weather_data
-                else:
-                    logger.warning(f"天气API返回空数据: {city}")
-            else:
-                logger.error(f"天气API调用失败: {result.get('info', '未知错误')}")
-            
-        except Exception as e:
-            logger.error(f"获取天气信息失败: {e}")
-        
-        return []
+    def get_weather(self, city: str, date: str = None) -> List[WeatherInfo]:
+        """获取天气信息 - 使用MCP服务"""
+        return self.mcp_client.call_service(MCPServiceType.WEATHER, city=city, date=date) or []
     
     def get_navigation_routes(self, origin: str, destination: str, 
                             transport_mode: str = "driving") -> List[RouteInfo]:
-        """获取导航路线 - 直接调用API，无缓存"""
-        logger.info(f"调用导航API获取实时路线: {origin} -> {destination}")
-        
-        try:
-            origin_coords = self._geocode(origin)
-            dest_coords = self._geocode(destination)
-            
-            if not origin_coords or not dest_coords:
-                logger.warning(f"无法获取坐标: {origin} 或 {destination}")
-                return []
-            
-            # 根据交通方式选择不同的API端点和参数
-            if transport_mode == "transit":
-                # 公交路径规划 - v3版本
-                params = {
-                    "key": get_api_key("AMAP_NAVIGATION"),
-                    "origin": origin_coords,
-                    "destination": dest_coords,
-                    "city": "上海",
-                    "cityd": "上海",
-                    "strategy": "0",  # 0:最快捷 1:最经济 2:最少换乘 3:最少步行
-                    "extensions": "base"
-                }
-                url = "https://restapi.amap.com/v3/direction/transit/integrated"
-            else:
-                # 驾车路径规划 - v3版本
-                params = {
-                    "key": get_api_key("AMAP_NAVIGATION"),
-                    "origin": origin_coords,
-                    "destination": dest_coords,
-                    "strategy": "10",  # 10:躲避拥堵，路程较短，时间最短（推荐）
-                    "extensions": "base"
-                }
-                url = "https://restapi.amap.com/v3/direction/driving"
-            
-            result = self._make_request(url, params, "navigation")
-            
-            if result.get("status") == "1":
-                routes = []
-                route_data = result.get("route", {})
-                
-                if transport_mode == "transit":
-                    transit_routes = route_data.get("transits", [])
-                    for i, route in enumerate(transit_routes[:2]):
-                        route_info = RouteInfo(
-                            distance=route.get("distance", ""),
-                            duration=route.get("duration", ""),
-                            traffic_status="实时路况",
-                            route_description=self._format_transit_route(route),
-                            congestion_level="正常"
-                        )
-                        routes.append(route_info)
-                else:
-                    driving_routes = route_data.get("paths", [])
-                    for i, route in enumerate(driving_routes[:2]):
-                        route_info = RouteInfo(
-                            distance=route.get("distance", ""),
-                            duration=route.get("duration", ""),
-                            traffic_status="实时路况",
-                            route_description=self._format_driving_route(route),
-                            congestion_level="正常"
-                        )
-                        routes.append(route_info)
-                
-                logger.info(f"导航API调用成功: {origin} -> {destination} - {len(routes)}条路线")
-                return routes
-            else:
-                logger.error(f"导航API调用失败: {result.get('info', '未知错误')}")
-                
-        except Exception as e:
-            logger.error(f"获取导航路线失败: {e}")
-        
-        return []
+        """获取导航路线 - 使用MCP服务"""
+        return self.mcp_client.call_service(
+            MCPServiceType.NAVIGATION,
+            origin=origin,
+            destination=destination,
+            transport_mode=transport_mode
+        ) or []
     
     def get_traffic_status(self, area: str) -> Dict[str, Any]:
-        """获取路况信息 - 直接调用API，无缓存"""
-        logger.info(f"调用路况API获取实时数据: {area}")
-        
-        try:
-            # 对于区域名称，先转换为具体地点
-            area_mapping = {
-                "徐汇区": "徐家汇",
-                "普陀区": "普陀区",
-                "华东师范大学": "华东师范大学",
-                "徐汇": "徐家汇",
-                "普陀": "普陀区"
-            }
+        """获取路况信息 - 使用MCP服务"""
+        result = self.mcp_client.call_service(MCPServiceType.TRAFFIC, area=area)
+        if result:
+            return result
+        # 返回默认数据
+        return {
+            "status": "正常",
+            "description": "路况良好",
+            "evaluation": {"level": "1", "status": "畅通"},
+            "timestamp": datetime.now().isoformat()
+        }
             
-            search_area = area_mapping.get(area, area)
-            
-            # 使用地理编码获取区域中心点坐标
-            center_coords = self._geocode(search_area)
-            if not center_coords:
-                logger.warning(f"无法获取区域坐标: {area}")
-                # 返回模拟数据
-                return {
-                    "status": "正常",
-                    "description": "路况良好",
-                    "evaluation": {"level": "1", "status": "畅通"},
-                    "timestamp": datetime.now().isoformat()
-                }
-            
-            # 构建矩形区域（以中心点为中心，范围约2km）
-            center_lng, center_lat = center_coords.split(',')
-            center_lng, center_lat = float(center_lng), float(center_lat)
-            
-            # 计算矩形范围（约2km）
-            delta = 0.02  # 约2km
-            rectangle = f"{center_lng-delta},{center_lat-delta},{center_lng+delta},{center_lat+delta}"
-            
-            params = {
-                "key": get_api_key("AMAP_TRAFFIC"),
-                "rectangle": rectangle,
-                "level": "4"
-            }
-            
-            result = self._make_request(AMAP_CONFIG["traffic_url"], params, "traffic")
-            
-            if result.get("status") == "1":
-                traffic_data = {
-                    "status": result.get("status", ""),
-                    "description": result.get("description", ""),
-                    "evaluation": result.get("evaluation", {}),
-                    "timestamp": datetime.now().isoformat()
-                }
-                
-                logger.info(f"路况API调用成功: {area}")
-                return traffic_data
-            else:
-                logger.error(f"路况API调用失败: {result.get('info', '未知错误')}")
-                # 返回模拟数据
-                return {
-                    "status": "正常",
-                    "description": "路况良好",
-                    "evaluation": {"level": "1", "status": "畅通"},
-                    "timestamp": datetime.now().isoformat()
-                }
-                
-        except Exception as e:
-            logger.error(f"获取路况信息失败: {e}")
-            # 返回模拟数据
-            return {
-                "status": "正常",
-                "description": "路况良好",
-                "evaluation": {"level": "1", "status": "畅通"},
-                "timestamp": datetime.now().isoformat()
-            }
-    
     def search_poi(self, keyword: str, city: str, category: str = None) -> List[POIInfo]:
-        """搜索POI信息 - 直接调用API，无缓存"""
-        logger.info(f"调用POI API搜索: {keyword} in {city} (类型: {category})")
+        """搜索POI信息 - 使用MCP服务"""
+        return self.mcp_client.call_service(
+            MCPServiceType.POI,
+            keyword=keyword,
+            city=city,
+            category=category
+        ) or []
+    
+    def _filter_shanghai_only(self, pois: List[POIInfo]) -> List[POIInfo]:
+        """过滤掉非上海地区的POI，确保只返回上海景点"""
+        filtered = []
         
-        try:
-            # POI搜索API - v3版本（关键字搜索）
-            params = {
-                "key": get_api_key("AMAP_POI"),
-                "keywords": keyword,
-                "city": city,
-                "types": category or "",
-                "offset": 10,  # 每页返回10条
-                "page": 1,
-                "extensions": "all"
-            }
-            
-            # 使用v3版本的POI搜索API
-            poi_url = "https://restapi.amap.com/v3/place/text"
-            result = self._make_request(poi_url, params, "poi")
-            
-            if result.get("status") == "1":
-                pois = []
-                for poi_data in result.get("pois", []):
-                    poi_info = POIInfo(
-                        name=poi_data.get("name", ""),
-                        address=poi_data.get("address", ""),
-                        rating=float(poi_data.get("biz_ext", {}).get("rating", "0") or "0"),
-                        business_hours=poi_data.get("biz_ext", {}).get("open_time", ""),
-                        price=poi_data.get("biz_ext", {}).get("cost", ""),
-                        distance=poi_data.get("distance", ""),
-                        category=poi_data.get("type", ""),
-                        reviews=poi_data.get("biz_ext", {}).get("comment", "").split(";") if poi_data.get("biz_ext", {}).get("comment") else []
-                    )
-                    pois.append(poi_info)
-                
-                pois.sort(key=lambda x: x.rating, reverse=True)
-                
-                logger.info(f"POI API调用成功: {keyword} - {len(pois)}个结果")
-                return pois
-            else:
-                logger.error(f"POI API调用失败: {result.get('info', '未知错误')}")
-                
-        except Exception as e:
-            logger.error(f"搜索POI失败: {e}")
+        # 非上海城市关键词（排除上海的街道名）
+        non_shanghai_cities = [
+            "北京", "广州", "深圳", "杭州", "南京", "苏州", "成都", "重庆",
+            "西安", "武汉", "天津", "长沙", "郑州", "济南", "青岛", "大连",
+            "厦门", "福州", "合肥", "南昌", "石家庄", "太原", "哈尔滨", "长春",
+            "沈阳", "昆明", "贵阳", "南宁", "海口", "乌鲁木齐", "拉萨", "银川",
+            "西宁", "兰州", "呼和浩特"
+        ]
         
-        return []
+        # 上海的街道名（这些应该保留）
+        shanghai_streets = [
+            "北京东路", "北京西路", "南京东路", "南京西路", "淮海东路", "淮海西路",
+            "中山北路", "中山南路", "中山中路", "中山东路", "中山南路", "中山北路",
+            "延安东路", "延安西路", "延安中路", "四川北路", "四川南路", "四川中路"
+        ]
+        
+        for poi in pois:
+            name = poi.name or ""
+            address = poi.address or ""
+            full_text = f"{name} {address}".lower()
+            
+            # 检查是否包含非上海城市关键词
+            is_non_shanghai = False
+            for city in non_shanghai_cities:
+                if city in full_text:
+                    # 检查是否是上海的街道名
+                    is_shanghai_street = any(street in name or street in address for street in shanghai_streets)
+                    if not is_shanghai_street:
+                        is_non_shanghai = True
+                        logger.warning(f"过滤非上海POI: {name} (地址: {address}) - 包含城市: {city}")
+                        break
+            
+            # 检查地址中是否明确包含非上海城市
+            if not is_non_shanghai:
+                # 检查districts格式（如"北京·北京·朝阳区"）
+                if "·" in address:
+                    parts = address.split("·")
+                    if len(parts) >= 2 and parts[0] not in ["上海", "Shanghai", "shanghai"]:
+                        is_non_shanghai = True
+                        logger.warning(f"过滤非上海POI: {name} (地址: {address}) - districts格式显示非上海")
+            
+            if not is_non_shanghai:
+                filtered.append(poi)
+        
+        if len(filtered) < len(pois):
+            logger.info(f"POI过滤: 原始{len(pois)}个，过滤后{len(filtered)}个（已过滤{len(pois) - len(filtered)}个非上海POI）")
+        
+        return filtered
     
     def get_inputtips(self, keywords: str, city: str = "上海", 
                       poi_type: str = None, location: str = None, 

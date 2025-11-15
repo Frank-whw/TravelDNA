@@ -192,7 +192,7 @@ export default function PlanningPage() {
                 <MapPin className="w-5 h-5 text-white" />
               </div>
               <span className="text-xl font-bold bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">
-                知旅
+                知小旅
               </span>
             </div>
             <nav className="hidden md:flex items-center space-x-6">
@@ -223,7 +223,7 @@ export default function PlanningPage() {
                   <Settings className="w-5 h-5" />
                   规划设置
                 </CardTitle>
-                <CardDescription>锁定上海，提前预留数据接口，快速生成智能行程。</CardDescription>
+                <CardDescription>像真人顾问一样懂需求、会变通。支持标签组合输入，快速生成个性化行程。</CardDescription>
               </CardHeader>
               <CardContent>
                 <form className="space-y-6" onSubmit={handleGeneratePlan}>
