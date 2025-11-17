@@ -84,6 +84,13 @@ class User(db.Model):
     __tablename__ = 'user'
     
     id = db.Column(db.Integer, primary_key=True)
+    # 账号相关字段
+    email = db.Column(db.String(255), unique=True, nullable=True)
+    phone = db.Column(db.String(20), unique=True, nullable=True)
+    password_hash = db.Column(db.String(255), nullable=True)
+    salt = db.Column(db.String(32), nullable=True)
+    status = db.Column(db.String(20), default='active', nullable=False)  # active, inactive, banned
+    # 用户信息字段
     name = db.Column(db.String(50), nullable=False)
     avatar = db.Column(db.String(255), default='https://space.coze.cn/api/coze_space/gen_image?image_size=square&prompt=User%20avatar%2C%20person%20portrait%2C%20cartoon%20style&sign=a9b44dd75e1d6cd26a8cf0935243421c')
     bio = db.Column(db.Text, nullable=True)
@@ -96,6 +103,11 @@ class User(db.Model):
     create_time = db.Column(db.DateTime, default=datetime.utcnow)
     update_time = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    # 添加检查约束：email 和 phone 至少有一个
+    __table_args__ = (
+        db.CheckConstraint('(email IS NOT NULL) OR (phone IS NOT NULL)', name='check_email_or_phone'),
+    )
+    
     # 关系
     created_teams = db.relationship('Team', backref='captain', lazy='dynamic')
     joined_teams = db.relationship('Team', secondary=team_member, backref=db.backref('members', lazy='dynamic'), lazy='dynamic')
@@ -106,8 +118,8 @@ class User(db.Model):
     def __repr__(self):
         return f'<User {self.name}>'
     
-    def to_dict(self):
-        return {
+    def to_dict(self, include_sensitive=False):
+        result = {
             'id': self.id,
             'name': self.name,
             'avatar': self.avatar,
@@ -118,8 +130,15 @@ class User(db.Model):
             'hobbies': [hobby.name for hobby in self.hobbies.all()],
             'travelDestination': self.travel_destination.name if self.travel_destination else None,
             'schedule': self.schedule_type.name if self.schedule_type else None,
-            'budget': self.budget_type.name if self.budget_type else None
+            'budget': self.budget_type.name if self.budget_type else None,
+            'status': self.status,
+            'createTime': self.create_time.isoformat() if self.create_time else None
         }
+        # 只在需要时包含敏感信息
+        if include_sensitive:
+            result['email'] = self.email
+            result['phone'] = self.phone
+        return result
 
 class Team(db.Model):
     __tablename__ = 'team'

@@ -1,5 +1,64 @@
+import hashlib
+import secrets
+import re
 from app import db
 from app.models import User, Hobby, MatchRecord
+
+# 密码加密和验证工具函数
+def generate_salt() -> str:
+    """生成随机盐值"""
+    return secrets.token_hex(16)
+
+def hash_password(password: str, salt: str = None) -> tuple:
+    """
+    对密码进行哈希加密
+    
+    Args:
+        password: 原始密码
+        salt: 盐值，如果为None则自动生成
+    
+    Returns:
+        (password_hash, salt) 元组
+    """
+    if salt is None:
+        salt = generate_salt()
+    # 使用 werkzeug 的 generate_password_hash，它会自动处理盐值
+    # 但为了与数据库中的 salt 字段配合，我们使用自定义方法
+    password_with_salt = password + salt
+    password_hash = hashlib.pbkdf2_hmac('sha256', password_with_salt.encode('utf-8'), salt.encode('utf-8'), 100000).hex()
+    return password_hash, salt
+
+def verify_password(password: str, password_hash: str, salt: str) -> bool:
+    """
+    验证密码
+    
+    Args:
+        password: 原始密码
+        password_hash: 存储的密码哈希
+        salt: 存储的盐值
+    
+    Returns:
+        验证是否通过
+    """
+    if not password or not password_hash or not salt:
+        return False
+    password_with_salt = password + salt
+    computed_hash = hashlib.pbkdf2_hmac('sha256', password_with_salt.encode('utf-8'), salt.encode('utf-8'), 100000).hex()
+    return computed_hash == password_hash
+
+def validate_email(email: str) -> bool:
+    """验证邮箱格式"""
+    if not email:
+        return False
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return bool(re.match(pattern, email))
+
+def validate_phone(phone: str) -> bool:
+    """验证手机号格式（支持中国大陆手机号）"""
+    if not phone:
+        return False
+    pattern = r'^1[3-9]\d{9}$'
+    return bool(re.match(pattern, phone))
 
 def calculate_match_score(user1, user2):
     """

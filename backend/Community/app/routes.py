@@ -5,7 +5,11 @@ from app.models import (
     Hobby, MbtiType, Destination, Schedule, Budget,
     user_hobby,team_member
 )
-from app.utils import find_matches, init_default_data
+from app.utils import (
+    find_matches, init_default_data,
+    hash_password, verify_password, generate_salt,
+    validate_email, validate_phone
+)
 
 # 初始化蓝图
 api_bp = Blueprint('api', __name__)
@@ -46,6 +50,136 @@ def init_users():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
+
+# 认证相关接口
+@api_bp.route('/auth/register', methods=['POST'])
+def register():
+    """用户注册"""
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({"status": "error", "message": "请求数据不能为空"}), 400
+    
+    # 验证必填字段
+    email = data.get('email', '').strip()
+    phone = data.get('phone', '').strip()
+    password = data.get('password', '').strip()
+    name = data.get('name', '').strip()
+    gender = data.get('gender', '').strip()
+    age = data.get('age')
+    
+    # email 和 phone 至少有一个
+    if not email and not phone:
+        return jsonify({"status": "error", "message": "邮箱或手机号至少填写一个"}), 400
+    
+    # 验证格式
+    if email and not validate_email(email):
+        return jsonify({"status": "error", "message": "邮箱格式不正确"}), 400
+    
+    if phone and not validate_phone(phone):
+        return jsonify({"status": "error", "message": "手机号格式不正确"}), 400
+    
+    # 验证密码
+    if not password or len(password) < 6:
+        return jsonify({"status": "error", "message": "密码长度至少为6位"}), 400
+    
+    # 验证基本信息
+    if not name:
+        return jsonify({"status": "error", "message": "昵称不能为空"}), 400
+    
+    if not gender:
+        return jsonify({"status": "error", "message": "性别不能为空"}), 400
+    
+    if not age or not isinstance(age, int) or age < 1 or age > 150:
+        return jsonify({"status": "error", "message": "年龄必须为1-150之间的整数"}), 400
+    
+    # 检查邮箱或手机号是否已存在
+    existing_user = None
+    if email:
+        existing_user = User.query.filter_by(email=email).first()
+        if existing_user:
+            return jsonify({"status": "error", "message": "该邮箱已被注册"}), 400
+    
+    if phone:
+        existing_user = User.query.filter_by(phone=phone).first()
+        if existing_user:
+            return jsonify({"status": "error", "message": "该手机号已被注册"}), 400
+    
+    try:
+        # 生成密码哈希和盐值
+        password_hash, salt = hash_password(password)
+        
+        # 创建用户
+        user = User(
+            email=email if email else None,
+            phone=phone if phone else None,
+            password_hash=password_hash,
+            salt=salt,
+            name=name,
+            gender=gender,
+            age=age,
+            status='active',
+            bio=data.get('bio', ''),
+            avatar=data.get('avatar', '')
+        )
+        
+        db.session.add(user)
+        db.session.commit()
+        
+        return jsonify({
+            "status": "success",
+            "message": "注册成功",
+            "data": user.to_dict()
+        }), 201
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": f"注册失败: {str(e)}"}), 500
+
+@api_bp.route('/auth/login', methods=['POST'])
+def login():
+    """用户登录"""
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({"status": "error", "message": "请求数据不能为空"}), 400
+    
+    # 支持邮箱或手机号登录
+    account = data.get('account', '').strip()  # 可以是邮箱或手机号
+    password = data.get('password', '').strip()
+    
+    if not account or not password:
+        return jsonify({"status": "error", "message": "账号和密码不能为空"}), 400
+    
+    # 查找用户
+    user = None
+    if validate_email(account):
+        user = User.query.filter_by(email=account).first()
+    elif validate_phone(account):
+        user = User.query.filter_by(phone=account).first()
+    else:
+        return jsonify({"status": "error", "message": "账号格式不正确，请输入邮箱或手机号"}), 400
+    
+    if not user:
+        return jsonify({"status": "error", "message": "账号或密码错误"}), 401
+    
+    # 验证密码
+    if not user.password_hash or not user.salt:
+        return jsonify({"status": "error", "message": "账号未设置密码，请联系管理员"}), 401
+    
+    if not verify_password(password, user.password_hash, user.salt):
+        return jsonify({"status": "error", "message": "账号或密码错误"}), 401
+    
+    # 检查账号状态
+    if user.status != 'active':
+        return jsonify({"status": "error", "message": f"账号已被{user.status}"}), 403
+    
+    # 登录成功，返回用户信息（不包含敏感信息）
+    return jsonify({
+        "status": "success",
+        "message": "登录成功",
+        "data": user.to_dict()
+    })
 
 # 用户相关接口
 @api_bp.route('/users/<int:user_id>', methods=['GET'])

@@ -13,11 +13,21 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 from typing import Iterable
+
+# 关键：加载同级目录的.env文件
+from dotenv import load_dotenv
+# 获取脚本所在目录，然后加载该目录下的.env文件
+script_dir = Path(__file__).parent
+env_path = script_dir / ".env"
+# 使用 override=True 确保环境变量被正确加载
+load_dotenv(env_path, override=True)
 
 import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
+
 
 
 DEFAULT_TABLES: Iterable[str] = (
@@ -145,10 +155,20 @@ def main() -> None:
     tables = args.tables or DEFAULT_TABLES
 
     try:
-        with psycopg.connect(dsn, autocommit=True) as conn:
-            print(f"Connected to PostgreSQL ({format_dsn_info(conn)})\n")
+        print(f"正在连接数据库...")
+        print(f"连接字符串: {dsn.split('@')[0]}@***" if '@' in dsn else dsn)
+        with psycopg.connect(dsn, connect_timeout=10, autocommit=True) as conn:
+            print(f"✅ Connected to PostgreSQL ({format_dsn_info(conn)})\n")
             describe_tables(conn, tables)
             sample_users(conn)
+    except psycopg.OperationalError as exc:
+        print(f"❌ 数据库连接错误: {exc}", file=sys.stderr)
+        print("\n可能的解决方案：", file=sys.stderr)
+        print("1. 检查网络连接", file=sys.stderr)
+        print("2. 确认 Supabase 数据库是否开启了连接池", file=sys.stderr)
+        print("3. 检查 Supabase Dashboard -> Settings -> Database -> Connection Pooling", file=sys.stderr)
+        print("4. 确认数据库密码和主机名是否正确", file=sys.stderr)
+        sys.exit(2)
     except psycopg.Error as exc:
         print(f"Database error: {exc}", file=sys.stderr)
         sys.exit(2)
